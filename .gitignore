@@ -1,0 +1,30 @@
+# Quarto output
+docs/
+/.quarto/
+
+# R artifacts
+.Rhistory
+.RData
+.Rproj.user/
+*.Rproj
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+env/
+
+# Data files (add exceptions as needed)
+data/raw/*
+data/clean/*
+!data/raw/.gitkeep
+!data/clean/.gitkeep
+
+# Generated graphs (add exceptions as needed)
+graphs/*
+!graphs/.gitkeep
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -1,0 +1,23 @@
+project:
+  type: book
+  output-dir: docs
+
+book:
+  title: "2026 Thesis"
+  author: "Author Name"
+  date: today
+  chapters:
+    - index.qmd
+    - chapters/exploratory_analysis.qmd
+    - chapters/feature_engineering.qmd
+    - chapters/results.qmd
+
+bibliography: references.bib
+
+format:
+  html:
+    theme: cosmo
+    toc: true
+  pdf:
+    documentclass: scrreprt
+    toc: true

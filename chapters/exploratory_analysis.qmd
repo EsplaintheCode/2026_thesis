@@ -1,0 +1,42 @@
+---
+title: "Exploratory Data Analysis"
+---
+
+## Overview
+
+This chapter presents the exploratory analysis of the dataset.
+
+## Data Summary
+
+```{r}
+#| label: load-data
+#| echo: true
+
+# Load cleaned data
+# data <- read.csv("../data/clean/your_data.csv")
+# summary(data)
+```
+
+## Distributions
+
+```{r}
+#| label: distributions
+#| echo: true
+
+# Example: histogram of a variable
+# hist(data$variable)
+```
+
+## Correlations
+
+```{r}
+#| label: correlations
+#| echo: true
+
+# Example: correlation matrix
+# cor(data[, numeric_columns])
+```
+
+## Key Findings
+
+*Summarise the key findings from the exploratory analysis here.*

@@ -1,0 +1,35 @@
+---
+title: "Results"
+---
+
+## Overview
+
+This chapter presents the results and discussion of the analysis.
+
+## Model / Analysis Results
+
+```{r}
+#| label: results
+#| echo: true
+
+# Load data and run analysis
+# source("../notebooks/feature_engineering/pipeline.R")
+```
+
+## Visualisations
+
+```{r}
+#| label: graphs
+#| echo: true
+
+# Load and display saved graphs
+# knitr::include_graphics("../graphs/your_plot.png")
+```
+
+## Discussion
+
+*Interpret the results and relate them back to the research questions.*
+
+## Conclusion
+
+*Summarise the key conclusions from this thesis.*

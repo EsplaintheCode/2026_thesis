@@ -1,0 +1,47 @@
+---
+title: "Feature Engineering"
+---
+
+## Overview
+
+This chapter describes the feature engineering steps applied to the dataset.
+
+## Data Cleaning
+
+```{r}
+#| label: data-cleaning
+#| echo: true
+
+# Load raw data
+# raw <- read.csv("../data/raw/your_raw_data.csv")
+
+# Cleaning steps
+# cleaned <- raw |> ...
+
+# Save cleaned data
+# write.csv(cleaned, "../data/clean/your_data.csv", row.names = FALSE)
+```
+
+## Feature Construction
+
+```{r}
+#| label: feature-construction
+#| echo: true
+
+# Create new features
+# data$new_feature <- ...
+```
+
+## Feature Selection
+
+```{r}
+#| label: feature-selection
+#| echo: true
+
+# Select final feature set
+# final_features <- data[, c("feature1", "feature2", ...)]
+```
+
+## Summary
+
+*Describe the final feature set and the rationale for the choices made.*

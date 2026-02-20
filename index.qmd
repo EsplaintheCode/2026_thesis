@@ -1,0 +1,15 @@
+---
+title: "2026 Thesis"
+---
+
+# Preface {.unnumbered}
+
+This is a Data Science & Statistics thesis written using [Quarto](https://quarto.org).
+
+## Abstract
+
+*Write your abstract here.*
+
+## Acknowledgements
+
+*Write your acknowledgements here.*
