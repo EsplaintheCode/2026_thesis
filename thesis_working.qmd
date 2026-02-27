@@ -1,0 +1,408 @@
+---
+title: "Fairness Drift in Mortgage Lending"
+subtitle: Comparing Minority-Owned and Non-Minority-Owned Banks, Savings Associations, and Credit Unions in Denial and Pricing Outcomes"
+author: 
+  - name: "Amy Esplain"
+    affiliations:
+      - name: "University of Arizona"
+date: "Spring 2026"
+
+format:
+  html:
+    number-sections: true
+    toc: true
+    toc-depth: 4
+    code-tools: true
+    embed-resources: true
+    grid:
+      margin-width: "0"
+      body-width: "1000px"
+    theme: cosmo
+    css: paper.css
+    anchor-sections: true
+    code-overflow: wrap
+    smooth-scroll: false
+
+  pdf:
+    documentclass: article
+    number-sections: true
+    indent: true
+    geometry: margin=1.25in
+    include-in-header:
+      text: |
+        \usepackage{fvextra}
+        \usepackage{etoolbox}
+        \makeatletter
+        \pretocmd{\@verbatim}{\small}{}{}
+        \makeatother
+        \fvset{
+          breaklines=true,
+          breakanywhere=true,
+          breaksymbolleft={}
+        }
+
+editor: visual
+execute:
+  warning: false
+
+jupyter: python3
+---
+
+### Store Files in DuckDB
+
+```{python}
+#| echo: false
+#| message: false
+#| warning: false
+
+# Import packages
+import pandas as pd
+import os
+import duckdb
+
+FILES = [
+    "raw_data/raw_data/2022_combined_mlar_header.txt",
+    "raw_data/raw_data/2023_combined_mlar_header.txt",
+    "raw_data/raw_data/2024_combined_mlar_header.txt",
+]
+
+leis = [
+    "YOURLEI1XXXXXXXXXXXX",
+    "YOURLEI2XXXXXXXXXXXX",
+]
+
+lei_col = "lei"  # <-- change if your column header is different
+
+con = duckdb.connect("hmda.duckdb")
+
+# Temp LEI list table
+con.execute("CREATE TEMP TABLE target_lei(lei VARCHAR)")
+con.executemany("INSERT INTO target_lei VALUES (?)", [(x,) for x in leis])
+
+files_sql = ", ".join([f"'{f}'" for f in FILES])
+
+con.execute(f"""
+COPY (
+  SELECT h.*
+  FROM read_csv_auto([{files_sql}], delim='|', header=true, union_by_name=true, files_to_sniff=-1) h
+  LEFT JOIN target_lei t
+    ON h.{lei_col} = t.lei
+) TO 'hmda_filtered_2022_2024.parquet' (FORMAT PARQUET);
+""")     
+
+```
+
+
+### List the columns name, data types, null counts from unfiltered data
+```{python}
+#| echo: false
+#| message: false
+#| warning: false
+
+# Create connection to analyze unfiltered data
+import duckdb
+import pandas as pd
+
+con_unfiltered = duckdb.connect()
+
+# Get basic column info (name, type)
+columns_info = con_unfiltered.execute("DESCRIBE SELECT * FROM 'hmda_filtered_2022_2024.parquet' LIMIT 0").fetchall()
+
+# Get row count for calculating null percentages
+total_rows = con_unfiltered.execute("SELECT COUNT(*) FROM 'hmda_filtered_2022_2024.parquet'").fetchone()[0]
+
+print(f"Total records in unfiltered dataset: {total_rows:,}")
+print("\nColumn Details:")
+print(f"{'#':<3} {'Column Name':<35} {'Data Type':<12} {'Null Count':<12} {'Null %':<8}")
+
+# Analyze each column for null counts
+for i, column_info in enumerate(columns_info, 1):
+    col_name, col_type = column_info[0], column_info[1]  # Get first two values safely
+    
+    # Count nulls and common HMDA missing value indicators
+    null_query = f"""
+    SELECT 
+        COUNT(*) as total,
+        COUNT(CASE 
+            WHEN {col_name} IS NULL 
+            OR {col_name} = '' 
+            OR {col_name} IN ('NA', 'Exempt', 'Not applicable', 'Not provided') 
+            THEN 1 END) as null_count
+    FROM 'hmda_filtered_2022_2024.parquet'
+    """
+    
+    try:
+        result = con_unfiltered.execute(null_query).fetchone()
+        total, null_count = result
+        null_pct = (null_count / total * 100) if total > 0 else 0
+        
+        print(f"{i:<3} {col_name:<35} {col_type:<12} {null_count:<12,} {null_pct:<7.1f}%")
+        
+    except Exception as e:
+        print(f"{i:<3} {col_name:<35} {col_type:<12} {'ERROR':<12} {'N/A':<8}")
+
+print(f"\nTotal columns: {len(columns_info)}")
+
+# Get columns grouped by null percentage ranges
+completeness_query = f"""
+WITH column_nulls AS (
+    SELECT 
+        COUNT(*) as total_cols,
+        SUM(CASE WHEN null_pct = 0 THEN 1 ELSE 0 END) as complete_cols,
+        SUM(CASE WHEN null_pct > 0 AND null_pct <= 10 THEN 1 ELSE 0 END) as low_missing,
+        SUM(CASE WHEN null_pct > 10 AND null_pct <= 50 THEN 1 ELSE 0 END) as moderate_missing,
+        SUM(CASE WHEN null_pct > 50 THEN 1 ELSE 0 END) as high_missing
+    FROM (
+        -- This would need to be calculated per column, simplified for now
+        SELECT 1 as placeholder
+    ) x
+)
+SELECT * FROM column_nulls
+"""
+
+# Manual calculation for summary (since we can't do the complex query easily)
+null_ranges = {'0%': 0, '1-10%': 0, '11-50%': 0, '51%+': 0}
+
+for column_info in columns_info:
+    col_name, col_type = column_info[0], column_info[1]  # Get first two values safely
+    null_query = f"""
+    SELECT 
+        COUNT(CASE 
+            WHEN {col_name} IS NULL 
+            OR {col_name} = '' 
+            OR {col_name} IN ('NA', 'Exempt', 'Not applicable', 'Not provided') 
+            THEN 1 END) * 100.0 / COUNT(*) as null_pct
+    FROM 'hmda_filtered_2022_2024.parquet'
+    """
+    
+    try:
+        null_pct = con_unfiltered.execute(null_query).fetchone()[0] or 0
+        
+        if null_pct == 0:
+            null_ranges['0%'] += 1
+        elif null_pct <= 10:
+            null_ranges['1-10%'] += 1
+        elif null_pct <= 50:
+            null_ranges['11-50%'] += 1
+        else:
+            null_ranges['51%+'] += 1
+            
+    except:
+        null_ranges['51%+'] += 1  # Count errors as high missing
+
+print("Columns by Missing Data Level:")
+for range_label, count in null_ranges.items():
+    pct = (count / len(columns_info) * 100) if len(columns_info) > 0 else 0
+    print(f"  {range_label:<8}: {count:>3} columns ({pct:>5.1f}%)")
+
+# Close connection
+con_unfiltered.close()
+```
+
+
+
+### Filter the data
+```{python}
+#| echo: false
+#| message: false
+#| warning: false
+
+# Futher filter the data to focus on conventional, owner-occupied, first-lien loans for 1-4 family properties for home purchases
+
+con.execute("""
+COPY (
+  SELECT *
+  FROM 'hmda_filtered_2022_2024.parquet'
+  WHERE derived_loan_product_type = 'Conventional:First Lien' -- conventional First-lien
+    AND occupancy_type = 1 -- Owner-occupied
+    AND derived_dwelling_category = 'Single Family (1-4 Units):Site-Built' -- 1-4 family site build
+    AND loan_purpose = 1 -- Home purchase 
+) TO 'hmda_filtered_2022_2024_filtered.parquet' (FORMAT PARQUET);
+""")
+
+```
+
+### Explore Filtered Data
+
+```{python}
+#| echo: false
+#| message: false
+#| warning: false
+
+# Create a new connection to avoid conflicts
+import duckdb
+import pandas as pd
+con_explore = duckdb.connect()
+
+# Get detailed column information
+print("HMDA Filtered Dataset Structure & Descriptive Statistics")
+print("(Conventional, Owner-Occupied, First-Lien, 1-4 Family, Home Purchase)")
+print("=" * 70)
+
+result = con_explore.execute("DESCRIBE SELECT * FROM 'hmda_filtered_2022_2024_filtered.parquet' LIMIT 0").fetchall()
+
+# Organize columns by category for better understanding
+demographic_cols = []
+loan_cols = []
+outcome_cols = []
+geographic_cols = []
+other_cols = []
+
+for row in result:
+    column_name, column_type = row[0], row[1]
+    
+    if any(term in column_name.lower() for term in ['race', 'ethnicity', 'sex', 'age']):
+        demographic_cols.append((column_name, column_type))
+    elif any(term in column_name.lower() for term in ['loan', 'amount', 'income', 'debt', 'rate', 'credit', 'cost', 'fee', 'value', 'term']):
+        loan_cols.append((column_name, column_type))
+    elif any(term in column_name.lower() for term in ['action', 'denial', 'approval', 'hoepa', 'lien', 'purchaser']):
+        outcome_cols.append((column_name, column_type))
+    elif any(term in column_name.lower() for term in ['state', 'county', 'census', 'tract']):
+        geographic_cols.append((column_name, column_type))
+    else:
+        other_cols.append((column_name, column_type))
+
+def print_column_group(title, columns):
+    print(f"\n{title}:")
+    print("-" * len(title))
+    for i, (col, dtype) in enumerate(columns, 1):
+        print(f"  {i:2d}. {col} ({dtype})")
+
+print_column_group("Key Demographic Variables", demographic_cols)
+print_column_group("Loan Characteristics", loan_cols)
+print_column_group("Outcome Variables", outcome_cols)
+print_column_group("Geographic Variables", geographic_cols)
+print_column_group("Other Variables", other_cols)
+
+print(f"\nTotal columns: {len(result)}")
+
+# Get basic dataset info
+row_count = con_explore.execute("SELECT COUNT(*) FROM 'hmda_filtered_2022_2024_filtered.parquet'").fetchone()[0]
+year_range = con_explore.execute("SELECT MIN(activity_year), MAX(activity_year) FROM 'hmda_filtered_2022_2024_filtered.parquet'").fetchone()
+
+print(f"\nFiltered Dataset Summary:")
+print(f"- Total records: {row_count:,}")
+print(f"- Years covered: {year_range[0]} to {year_range[1]}")
+
+# Compare with original dataset size
+orig_count = con_explore.execute("SELECT COUNT(*) FROM 'hmda_filtered_2022_2024.parquet'").fetchone()[0]
+filter_pct = (row_count / orig_count * 100) if orig_count > 0 else 0
+print(f"- Filtered to {filter_pct:.1f}% of original dataset ({orig_count:,} total records)")
+
+# Detailed statistics by year for key variables
+print("\n" + "=" * 60)
+print("DETAILED STATISTICS BY YEAR")
+print("=" * 60)
+
+# Key numeric variables for analysis (excluding coded/categorical variables that should be treated as strings)
+key_vars = {
+    'loan_amount': 'Loan Amount ($)',
+    'income': 'Applicant Income ($)',
+    'property_value': 'Property Value ($)',
+    'rate_spread': 'Rate Spread (%)',
+    'debt_to_income_ratio': 'Debt-to-Income Ratio',
+    'combined_loan_to_value_ratio': 'Combined LTV Ratio',
+    'total_loan_costs': 'Total Loan Costs ($)',
+    'total_points_and_fees': 'Total Points & Fees ($)',
+    'interest_rate': 'Interest Rate (%)',
+    'origination_charges': 'Origination Charges ($)',
+    'loan_term': 'Loan Term (months)'
+}
+
+for var, description in key_vars.items():
+    print(f"\n{description} ({var}):")
+    print("-" * (len(description) + len(var) + 4))
+    
+    # Convert to numeric, handling 'Exempt' and 'NA' values
+    stats_query = f"""
+    SELECT 
+        activity_year,
+        COUNT(*) as total_records,
+        COUNT(CASE 
+            WHEN {var} NOT IN ('Exempt', 'NA', '', 'Not applicable') 
+            AND TRY_CAST({var} AS DOUBLE) IS NOT NULL 
+            THEN 1 END) as valid_numeric,
+        COUNT(CASE 
+            WHEN {var} IN ('Exempt', 'NA', '', 'Not applicable') 
+            OR TRY_CAST({var} AS DOUBLE) IS NULL 
+            THEN 1 END) as null_or_exempt,
+        AVG(TRY_CAST({var} AS DOUBLE)) as mean_value,
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY TRY_CAST({var} AS DOUBLE)) as median_value,
+        MIN(TRY_CAST({var} AS DOUBLE)) as min_value,
+        MAX(TRY_CAST({var} AS DOUBLE)) as max_value,
+        STDDEV(TRY_CAST({var} AS DOUBLE)) as std_dev
+    FROM 'hmda_filtered_2022_2024_filtered.parquet'
+    WHERE TRY_CAST({var} AS DOUBLE) IS NOT NULL
+    GROUP BY activity_year
+    ORDER BY activity_year
+    """
+    
+    try:
+        stats_result = con_explore.execute(stats_query).fetchall()
+        
+        for year_stats in stats_result:
+            year, total, valid, null_exempt, mean, median, min_val, max_val, std_dev = year_stats
+            null_pct = (null_exempt / total * 100) if total > 0 else 0
+            
+            print(f"  {year}:")
+            print(f"    Records: {total:,} (Valid: {valid:,}, Null/Exempt: {null_exempt:,} [{null_pct:.1f}%])")
+            if valid > 0 and mean is not None:
+                print(f"    Mean: {mean:,.2f} | Median: {median:,.2f} | Std Dev: {std_dev:,.2f}")
+                print(f"    Range: {min_val:,.2f} to {max_val:,.2f}")
+            else:
+                print(f"    No valid numeric data available")
+                
+    except Exception as e:
+        print(f"  Error analyzing {var}: {str(e)}")
+
+# Categorical variable summaries
+print(f"\n{'=' * 60}")
+print("KEY CATEGORICAL VARIABLES BY YEAR")
+print("=" * 60)
+
+categorical_vars = {
+    'action_taken': 'Loan Decision Outcome',
+    'loan_type': 'Loan Type', 
+    'loan_purpose': 'Loan Purpose',
+    'occupancy_type': 'Occupancy Type',
+    'applicant_race_1': 'Primary Race',
+    'applicant_ethnicity_1': 'Primary Ethnicity',
+    'applicant_sex': 'Applicant Sex'
+}
+
+for var, description in categorical_vars.items():
+    print(f"\n{description} ({var}) - Value Counts by Year:")
+    print("-" * (len(description) + len(var) + 30))
+    
+    cat_query = f"""
+    SELECT 
+        activity_year,
+        {var},
+        COUNT(*) as count,
+        ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (PARTITION BY activity_year), 2) as percentage
+    FROM 'hmda_filtered_2022_2024_filtered.parquet'
+    GROUP BY activity_year, {var}
+    ORDER BY activity_year, count DESC
+    """
+    
+    try:
+        cat_result = con_explore.execute(cat_query).fetchall()
+        current_year = None
+        
+        for row in cat_result:
+            year, value, count, pct = row
+            if year != current_year:
+                if current_year is not None:
+                    print()  # Add space between years
+                print(f"  {year}:")
+                current_year = year
+            print(f"    {value}: {count:,} ({pct}%)")
+            
+    except Exception as e:
+        print(f"  Error analyzing {var}: {str(e)}")
+
+# Close the exploration connection
+con_explore.close()
+```
+
+####

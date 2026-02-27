@@ -1,0 +1,93 @@
+---
+title: "Fairness Drift in Mortgage Lending"
+subtitle: Comparing Minority-Owned and Non-Minority-Owned Banks, Savings Associations, and Credit Unions in Denial and Pricing Outcomes"
+author: 
+  - name: "Amy Esplain"
+    affiliations:
+      - name: "University of Arizona"
+date: "Spring 2026"
+
+format:
+  html:
+    number-sections: true
+    toc: true
+    toc-depth: 4
+    code-tools: true
+    embed-resources: true
+    grid:
+      margin-width: "0"
+      body-width: "1000px"
+    theme: cosmo
+    css: paper.css
+    anchor-sections: true
+    code-overflow: wrap
+    smooth-scroll: false
+
+  pdf:
+    documentclass: article
+    number-sections: true
+    indent: true
+    geometry: margin=1.25in
+    include-in-header:
+      text: |
+        \usepackage{fvextra}
+        \usepackage{etoolbox}
+        \makeatletter
+        \pretocmd{\@verbatim}{\small}{}{}
+        \makeatother
+        \fvset{
+          breaklines=true,
+          breakanywhere=true,
+          breaksymbolleft={}
+        }
+
+editor: visual
+execute:
+  warning: false
+
+jupyter: python3
+---
+
+## Research Background
+
+Mortgage lending fairness is often evaluated at one point in time, but lending systems, underwriting policies, and applicant pools change. This thesis studies whether fairness outcomes are stable or drifting over time, and whether patterns differ by institution type (banks, savings associations, credit unions) and ownership status (minority-owned vs non-minority-owned).  The project combines statistical inference, machine learning model evaluation, and model risk management (MRM) monitoring design, with two outcomes: denial (access) and rate spread (pricing).
+
+### Research Questions
+
+1/ Do mortgage outcome disparities (denial and rate spread) differ across banks, savings associations, and credit unions?
+2/ Within each institution type, do minority-owned institutions show different disparity patterns than non-minority-owned institutions?
+3/ After adjusting for available underwriting-related variables, what denial and pricing disparities remain?
+4/ Are denial and rate-spread fairness metrics stable over time, or do they drift?
+5/ Do machine learning models introduce fairness-performance tradeoffs that require governance intervention?
+
+## Data Description & Cleaning
+
+## Exploratory Data Analysis
+
+## Literature Review
+
+## Model Methods
+
+### MODEL 1
+
+### MODEL 2
+
+### MODEL 3
+
+
+
+## Conclusion
+
+placeholder
+
+## Future Considerations
+
+placeholder
+
+## References
+
+placeholder
+
+## Appendix
+
+placeholder
