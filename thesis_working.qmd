@@ -60,58 +60,90 @@ import pandas as pd
 import os
 import duckdb
 
+# Combine HMDA files across 2022-2024
+
 FILES = [
     "raw_data/raw_data/2022_combined_mlar_header.txt",
     "raw_data/raw_data/2023_combined_mlar_header.txt",
     "raw_data/raw_data/2024_combined_mlar_header.txt",
 ]
 
-leis = [
-    "YOURLEI1XXXXXXXXXXXX",
-    "YOURLEI2XXXXXXXXXXXX",
-]
+# Read LEIs and Low Income Designation from Final_CU_List.xlsx
+cu_list = pd.read_excel("Final_CU_List.xlsx")
+cu_data = cu_list[['LEI', 'Low Income Designation']].dropna(subset=['LEI']).drop_duplicates(subset=['LEI'])
+print(f"Loaded {len(cu_data)} unique LEIs with Low Income Designation from Final_CU_List.xlsx")
 
 lei_col = "lei"  # <-- change if your column header is different
 
 con = duckdb.connect("hmda.duckdb")
 
-# Temp LEI list table
-con.execute("CREATE TEMP TABLE target_lei(lei VARCHAR)")
-con.executemany("INSERT INTO target_lei VALUES (?)", [(x,) for x in leis])
+# Temp table with LEI and Low Income Designation
+con.execute("CREATE TEMP TABLE target_lei(lei VARCHAR, low_income_designation VARCHAR)")
+cu_tuples = [(row['LEI'], row['Low Income Designation']) for _, row in cu_data.iterrows()]
+con.executemany("INSERT INTO target_lei VALUES (?, ?)", cu_tuples)
 
 files_sql = ", ".join([f"'{f}'" for f in FILES])
 
 con.execute(f"""
 COPY (
-  SELECT h.*
+  SELECT h.*, t.low_income_designation
   FROM read_csv_auto([{files_sql}], delim='|', header=true, union_by_name=true, files_to_sniff=-1) h
-  LEFT JOIN target_lei t
+  INNER JOIN target_lei t
     ON h.{lei_col} = t.lei
 ) TO 'hmda_filtered_2022_2024.parquet' (FORMAT PARQUET);
-""")     
+""")
+
 
 ```
 
 
-### List the columns name, data types, null counts from unfiltered data
+
+### Filter the data
 ```{python}
 #| echo: false
 #| message: false
 #| warning: false
 
-# Create connection to analyze unfiltered data
+
+
+# Filter the data to focus on conventional, owner-occupied, first-lien loans for 1-4 family properties for home purchases
+
+con.execute("""
+COPY (
+  SELECT *
+  FROM 'hmda_filtered_2022_2024.parquet'
+  WHERE loan_type = 1 -- First-lien
+    AND occupancy_type = 1 -- Owner-occupied
+    AND lien_status = 1 -- Conventional loans
+    AND total_units IN ('1', '2', '3', '4') -- 1-4 family properties
+    AND loan_purpose = 1 -- Home purchase 
+) TO 'hmda_filtered_2022_2024_filtered.parquet' (FORMAT PARQUET);
+""")
+
+```
+
+### List the columns name, data types, null counts from FILTER data
+
+```{python}
+#| echo: false
+#| message: false
+#| warning: false
+
+# Create connection to analyze filtered data
 import duckdb
 import pandas as pd
 
-con_unfiltered = duckdb.connect()
+con_filtered = duckdb.connect()
+
+# Get column information from the filtered dataset
 
 # Get basic column info (name, type)
-columns_info = con_unfiltered.execute("DESCRIBE SELECT * FROM 'hmda_filtered_2022_2024.parquet' LIMIT 0").fetchall()
+columns_info = con_filtered.execute("DESCRIBE SELECT * FROM 'hmda_filtered_2022_2024_filtered.parquet' LIMIT 0").fetchall()
 
 # Get row count for calculating null percentages
-total_rows = con_unfiltered.execute("SELECT COUNT(*) FROM 'hmda_filtered_2022_2024.parquet'").fetchone()[0]
+total_rows = con_filtered.execute("SELECT COUNT(*) FROM 'hmda_filtered_2022_2024_filtered.parquet'").fetchone()[0]
 
-print(f"Total records in unfiltered dataset: {total_rows:,}")
+print(f"Total records in filtered dataset: {total_rows:,}")
 print("\nColumn Details:")
 print(f"{'#':<3} {'Column Name':<35} {'Data Type':<12} {'Null Count':<12} {'Null %':<8}")
 
@@ -125,14 +157,15 @@ for i, column_info in enumerate(columns_info, 1):
         COUNT(*) as total,
         COUNT(CASE 
             WHEN {col_name} IS NULL 
-            OR {col_name} = '' 
-            OR {col_name} IN ('NA', 'Exempt', 'Not applicable', 'Not provided') 
+            OR (CASE WHEN TRY_CAST({col_name} AS VARCHAR) IS NOT NULL 
+                THEN TRY_CAST({col_name} AS VARCHAR) IN ('', 'NA', 'Exempt', 'Not applicable', 'Not provided')
+                ELSE FALSE END)
             THEN 1 END) as null_count
-    FROM 'hmda_filtered_2022_2024.parquet'
+    FROM 'hmda_filtered_2022_2024_filtered.parquet'
     """
     
     try:
-        result = con_unfiltered.execute(null_query).fetchone()
+        result = con_filtered.execute(null_query).fetchone()
         total, null_count = result
         null_pct = (null_count / total * 100) if total > 0 else 0
         
@@ -143,266 +176,333 @@ for i, column_info in enumerate(columns_info, 1):
 
 print(f"\nTotal columns: {len(columns_info)}")
 
-# Get columns grouped by null percentage ranges
-completeness_query = f"""
-WITH column_nulls AS (
-    SELECT 
-        COUNT(*) as total_cols,
-        SUM(CASE WHEN null_pct = 0 THEN 1 ELSE 0 END) as complete_cols,
-        SUM(CASE WHEN null_pct > 0 AND null_pct <= 10 THEN 1 ELSE 0 END) as low_missing,
-        SUM(CASE WHEN null_pct > 10 AND null_pct <= 50 THEN 1 ELSE 0 END) as moderate_missing,
-        SUM(CASE WHEN null_pct > 50 THEN 1 ELSE 0 END) as high_missing
-    FROM (
-        -- This would need to be calculated per column, simplified for now
-        SELECT 1 as placeholder
-    ) x
-)
-SELECT * FROM column_nulls
+```
+    
+
+### Feature Engineering and Analysis
+
+### Feature Engineering
+```{python}
+#| echo: false
+#| message: false
+#| warning: false
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
+
+# Summarize columns by low income designation, denial rates (not count), pricing outcomes for each year and between low income designation
+summary_query = """
+SELECT
+    low_income_designation,
+    activity_year,
+    COUNT(*) AS total_applications,
+    SUM(CASE WHEN action_taken = 3 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS denial_rate,
+    AVG(CASE WHEN action_taken IN (1, 2) THEN 1 ELSE 0 END) * 100.0 AS approval_rate,
+    AVG(CASE WHEN action_taken IN (1, 2) THEN CAST(loan_amount AS FLOAT) END) AS avg_loan_amount
+FROM 'hmda_filtered_2022_2024_filtered.parquet'
+-- Grouping by low income designation and activity_year for comparison
+GROUP BY low_income_designation, activity_year
+ORDER BY low_income_designation, activity_year
 """
 
-# Manual calculation for summary (since we can't do the complex query easily)
-null_ranges = {'0%': 0, '1-10%': 0, '11-50%': 0, '51%+': 0}
-
-for column_info in columns_info:
-    col_name, col_type = column_info[0], column_info[1]  # Get first two values safely
-    null_query = f"""
-    SELECT 
-        COUNT(CASE 
-            WHEN {col_name} IS NULL 
-            OR {col_name} = '' 
-            OR {col_name} IN ('NA', 'Exempt', 'Not applicable', 'Not provided') 
-            THEN 1 END) * 100.0 / COUNT(*) as null_pct
-    FROM 'hmda_filtered_2022_2024.parquet'
-    """
-    
-    try:
-        null_pct = con_unfiltered.execute(null_query).fetchone()[0] or 0
-        
-        if null_pct == 0:
-            null_ranges['0%'] += 1
-        elif null_pct <= 10:
-            null_ranges['1-10%'] += 1
-        elif null_pct <= 50:
-            null_ranges['11-50%'] += 1
-        else:
-            null_ranges['51%+'] += 1
-            
-    except:
-        null_ranges['51%+'] += 1  # Count errors as high missing
-
-print("Columns by Missing Data Level:")
-for range_label, count in null_ranges.items():
-    pct = (count / len(columns_info) * 100) if len(columns_info) > 0 else 0
-    print(f"  {range_label:<8}: {count:>3} columns ({pct:>5.1f}%)")
-
-# Close connection
-con_unfiltered.close()
+summary_df = con_filtered.execute(summary_query).fetchdf()
+print(summary_df) 
 ```
 
-
-
-### Filter the data
+### Denial Rates & Loan Amount Distributions by Low Income Designation and Year
 ```{python}
 #| echo: false
 #| message: false
 #| warning: false
 
-# Futher filter the data to focus on conventional, owner-occupied, first-lien loans for 1-4 family properties for home purchases
+### Denial Rates
 
-con.execute("""
-COPY (
-  SELECT *
-  FROM 'hmda_filtered_2022_2024.parquet'
-  WHERE derived_loan_product_type = 'Conventional:First Lien' -- conventional First-lien
-    AND occupancy_type = 1 -- Owner-occupied
-    AND derived_dwelling_category = 'Single Family (1-4 Units):Site-Built' -- 1-4 family site build
-    AND loan_purpose = 1 -- Home purchase 
-) TO 'hmda_filtered_2022_2024_filtered.parquet' (FORMAT PARQUET);
-""")
+# Plot denial rates by low income designation and year
 
+sns.set(style="whitegrid")
+plt.figure(figsize=(10,5))
+sns.barplot(x="activity_year", y="denial_rate", hue="low_income_designation", data=summary_df)
+plt.title("Denial Rates by Low Income Designation and Year")
+plt.ylabel("Denial Rate (%)")
+plt.xlabel("Year")
+plt.legend(title="Low Income Designation")
+plt.show()
+
+
+# Distribution of Loan Amounts by Low Income Designation and Year using box plots and histograms
+
+# Get individual loan amounts for approved loans (not averages)
+loan_distribution_query = """
+SELECT
+    low_income_designation,
+    activity_year,
+    CAST(loan_amount AS FLOAT) AS loan_amount
+FROM 'hmda_filtered_2022_2024_filtered.parquet'
+WHERE action_taken IN (1, 2) -- Only approved/originated loans
+  AND loan_amount IS NOT NULL
+  AND CAST(loan_amount AS FLOAT) > 0
+ORDER BY low_income_designation, activity_year
+"""
+
+# Execute the query to create loan_df
+loan_df = con_filtered.execute(loan_distribution_query).fetchdf()
+print(f"Loan distribution data shape: {loan_df.shape}")
+print(loan_df.head())
+
+# Histogram plot showing loan amount distributions by low income designation and year for approved loans
+
+# Create histogram with subplots for each year
+plt.figure(figsize=(15,9))
+years = sorted(loan_df['activity_year'].unique())
+for i, year in enumerate(years):
+    plt.subplot(2, 2, i+1)
+    year_data = loan_df[loan_df['activity_year'] == year]
+    
+    for designation in sorted(year_data['low_income_designation'].unique()):
+        designation_data = year_data[year_data['low_income_designation'] == designation]
+        plt.hist(designation_data['loan_amount'], bins=30, alpha=0.7, 
+                label=f'{designation}', density=True, edgecolor='black', linewidth=0.5)
+    
+    plt.title(f'Loan Amount Distribution - {year}')
+    plt.xlabel('Loan Amount ($)')
+    plt.ylabel('Density')
+    plt.legend(title='Low Income Designation')
+    plt.ticklabel_format(style='plain', axis='x')
+    plt.xlim(0, 2000000)
+    plt.grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+
+
+# Box plot showing loan amount distribution by low income designation and year
+plt.figure(figsize=(15,9))
+sns.boxplot(x="activity_year", y="loan_amount", hue="low_income_designation", data=loan_df)
+plt.title("Distribution of Loan Amounts by Low Income Designation and Year")
+plt.ylabel("Loan Amount ($)")
+plt.xlabel("Year")
+plt.legend(title="Low Income Designation")
+plt.ticklabel_format(style='plain', axis='y')
+plt.ylim(0, 2000000)
+plt.xticks(rotation=0)
+plt.show()
+
+# Histogram showing loan amount distributions
+plt.figure(figsize=(15,9))
+for i, year in enumerate(sorted(loan_df['activity_year'].unique())):
+    plt.subplot(2, 2, i+1)
+    year_data = loan_df[loan_df['activity_year'] == year]
+    for designation in year_data['low_income_designation'].unique():
+        designation_data = year_data[year_data['low_income_designation'] == designation]
+        plt.hist(designation_data['loan_amount'], bins=50, alpha=0.6, 
+                label=designation, density=True)
+    plt.title(f'Loan Amount Distribution - {year}')
+    plt.xlabel('Loan Amount ($)')
+    plt.ylabel('Density')
+    plt.legend()
+    plt.ticklabel_format(style='plain', axis='x')
+    plt.xlim(0, 2000000)
+
+plt.tight_layout()
+plt.show()
 ```
 
-### Explore Filtered Data
 
+### Interest Rate Spread Distributions by Low Income Designation and Year
 ```{python}
 #| echo: false
 #| message: false
 #| warning: false
 
-# Create a new connection to avoid conflicts
-import duckdb
-import pandas as pd
-con_explore = duckdb.connect()
+# Pricing (interest rates) analysis by low income designation and year for approved loans
+pricing_query = """
+SELECT
+    low_income_designation,
+    activity_year,
+    CAST(interest_rate AS FLOAT) AS interest_rate
+FROM 'hmda_filtered_2022_2024_filtered.parquet'
+WHERE action_taken IN (1, 2) -- Only approved/originated loans
+  AND interest_rate IS NOT NULL
+  AND TRY_CAST(interest_rate AS FLOAT) IS NOT NULL -- Filter out non-numeric values like 'Exempt'
+  AND TRY_CAST(interest_rate AS FLOAT) > 0
+ORDER BY low_income_designation, activity_year
+"""
+pricing_df = con_filtered.execute(pricing_query).fetchdf()
+print(f"Pricing data shape: {pricing_df.shape}")
+print(pricing_df.head())
 
-# Get detailed column information
-print("HMDA Filtered Dataset Structure & Descriptive Statistics")
-print("(Conventional, Owner-Occupied, First-Lien, 1-4 Family, Home Purchase)")
-print("=" * 70)
-
-result = con_explore.execute("DESCRIBE SELECT * FROM 'hmda_filtered_2022_2024_filtered.parquet' LIMIT 0").fetchall()
-
-# Organize columns by category for better understanding
-demographic_cols = []
-loan_cols = []
-outcome_cols = []
-geographic_cols = []
-other_cols = []
-
-for row in result:
-    column_name, column_type = row[0], row[1]
-    
-    if any(term in column_name.lower() for term in ['race', 'ethnicity', 'sex', 'age']):
-        demographic_cols.append((column_name, column_type))
-    elif any(term in column_name.lower() for term in ['loan', 'amount', 'income', 'debt', 'rate', 'credit', 'cost', 'fee', 'value', 'term']):
-        loan_cols.append((column_name, column_type))
-    elif any(term in column_name.lower() for term in ['action', 'denial', 'approval', 'hoepa', 'lien', 'purchaser']):
-        outcome_cols.append((column_name, column_type))
-    elif any(term in column_name.lower() for term in ['state', 'county', 'census', 'tract']):
-        geographic_cols.append((column_name, column_type))
-    else:
-        other_cols.append((column_name, column_type))
-
-def print_column_group(title, columns):
-    print(f"\n{title}:")
-    print("-" * len(title))
-    for i, (col, dtype) in enumerate(columns, 1):
-        print(f"  {i:2d}. {col} ({dtype})")
-
-print_column_group("Key Demographic Variables", demographic_cols)
-print_column_group("Loan Characteristics", loan_cols)
-print_column_group("Outcome Variables", outcome_cols)
-print_column_group("Geographic Variables", geographic_cols)
-print_column_group("Other Variables", other_cols)
-
-print(f"\nTotal columns: {len(result)}")
-
-# Get basic dataset info
-row_count = con_explore.execute("SELECT COUNT(*) FROM 'hmda_filtered_2022_2024_filtered.parquet'").fetchone()[0]
-year_range = con_explore.execute("SELECT MIN(activity_year), MAX(activity_year) FROM 'hmda_filtered_2022_2024_filtered.parquet'").fetchone()
-
-print(f"\nFiltered Dataset Summary:")
-print(f"- Total records: {row_count:,}")
-print(f"- Years covered: {year_range[0]} to {year_range[1]}")
-
-# Compare with original dataset size
-orig_count = con_explore.execute("SELECT COUNT(*) FROM 'hmda_filtered_2022_2024.parquet'").fetchone()[0]
-filter_pct = (row_count / orig_count * 100) if orig_count > 0 else 0
-print(f"- Filtered to {filter_pct:.1f}% of original dataset ({orig_count:,} total records)")
-
-# Detailed statistics by year for key variables
-print("\n" + "=" * 60)
-print("DETAILED STATISTICS BY YEAR")
-print("=" * 60)
-
-# Key numeric variables for analysis (excluding coded/categorical variables that should be treated as strings)
-key_vars = {
-    'loan_amount': 'Loan Amount ($)',
-    'income': 'Applicant Income ($)',
-    'property_value': 'Property Value ($)',
-    'rate_spread': 'Rate Spread (%)',
-    'debt_to_income_ratio': 'Debt-to-Income Ratio',
-    'combined_loan_to_value_ratio': 'Combined LTV Ratio',
-    'total_loan_costs': 'Total Loan Costs ($)',
-    'total_points_and_fees': 'Total Points & Fees ($)',
-    'interest_rate': 'Interest Rate (%)',
-    'origination_charges': 'Origination Charges ($)',
-    'loan_term': 'Loan Term (months)'
-}
-
-for var, description in key_vars.items():
-    print(f"\n{description} ({var}):")
-    print("-" * (len(description) + len(var) + 4))
-    
-    # Convert to numeric, handling 'Exempt' and 'NA' values
-    stats_query = f"""
-    SELECT 
-        activity_year,
-        COUNT(*) as total_records,
-        COUNT(CASE 
-            WHEN {var} NOT IN ('Exempt', 'NA', '', 'Not applicable') 
-            AND TRY_CAST({var} AS DOUBLE) IS NOT NULL 
-            THEN 1 END) as valid_numeric,
-        COUNT(CASE 
-            WHEN {var} IN ('Exempt', 'NA', '', 'Not applicable') 
-            OR TRY_CAST({var} AS DOUBLE) IS NULL 
-            THEN 1 END) as null_or_exempt,
-        AVG(TRY_CAST({var} AS DOUBLE)) as mean_value,
-        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY TRY_CAST({var} AS DOUBLE)) as median_value,
-        MIN(TRY_CAST({var} AS DOUBLE)) as min_value,
-        MAX(TRY_CAST({var} AS DOUBLE)) as max_value,
-        STDDEV(TRY_CAST({var} AS DOUBLE)) as std_dev
-    FROM 'hmda_filtered_2022_2024_filtered.parquet'
-    WHERE TRY_CAST({var} AS DOUBLE) IS NOT NULL
-    GROUP BY activity_year
-    ORDER BY activity_year
-    """
-    
-    try:
-        stats_result = con_explore.execute(stats_query).fetchall()
-        
-        for year_stats in stats_result:
-            year, total, valid, null_exempt, mean, median, min_val, max_val, std_dev = year_stats
-            null_pct = (null_exempt / total * 100) if total > 0 else 0
-            
-            print(f"  {year}:")
-            print(f"    Records: {total:,} (Valid: {valid:,}, Null/Exempt: {null_exempt:,} [{null_pct:.1f}%])")
-            if valid > 0 and mean is not None:
-                print(f"    Mean: {mean:,.2f} | Median: {median:,.2f} | Std Dev: {std_dev:,.2f}")
-                print(f"    Range: {min_val:,.2f} to {max_val:,.2f}")
-            else:
-                print(f"    No valid numeric data available")
-                
-    except Exception as e:
-        print(f"  Error analyzing {var}: {str(e)}")
-
-# Categorical variable summaries
-print(f"\n{'=' * 60}")
-print("KEY CATEGORICAL VARIABLES BY YEAR")
-print("=" * 60)
-
-categorical_vars = {
-    'action_taken': 'Loan Decision Outcome',
-    'loan_type': 'Loan Type', 
-    'loan_purpose': 'Loan Purpose',
-    'occupancy_type': 'Occupancy Type',
-    'applicant_race_1': 'Primary Race',
-    'applicant_ethnicity_1': 'Primary Ethnicity',
-    'applicant_sex': 'Applicant Sex'
-}
-
-for var, description in categorical_vars.items():
-    print(f"\n{description} ({var}) - Value Counts by Year:")
-    print("-" * (len(description) + len(var) + 30))
-    
-    cat_query = f"""
-    SELECT 
-        activity_year,
-        {var},
-        COUNT(*) as count,
-        ROUND(COUNT(*) * 100.0 / SUM(COUNT(*)) OVER (PARTITION BY activity_year), 2) as percentage
-    FROM 'hmda_filtered_2022_2024_filtered.parquet'
-    GROUP BY activity_year, {var}
-    ORDER BY activity_year, count DESC
-    """
-    
-    try:
-        cat_result = con_explore.execute(cat_query).fetchall()
-        current_year = None
-        
-        for row in cat_result:
-            year, value, count, pct = row
-            if year != current_year:
-                if current_year is not None:
-                    print()  # Add space between years
-                print(f"  {year}:")
-                current_year = year
-            print(f"    {value}: {count:,} ({pct}%)")
-            
-    except Exception as e:
-        print(f"  Error analyzing {var}: {str(e)}")
-
-# Close the exploration connection
-con_explore.close()
+# Visualize pricing distributions by low income designation and year using box plots
+plt.figure(figsize=(15,9))
+sns.boxplot(x="activity_year", y="interest_rate", hue="low_income_designation", data=pricing_df)
+plt.title("Distribution of Interest Rates by Low Income Designation and Year")
+plt.ylabel("Interest Rate (%)")
+plt.xlabel("Year")
+plt.legend(title="Low Income Designation")
+plt.ylim(0, 20)
+plt.xticks(rotation=0)
+plt.show()  
 ```
 
-####
+
+
+
+## Cohort Comparison: bucketize similar loans into cohorts based on loan amount, interest rate, and other relevant features to compare outcomes between low income designations while controlling for loan characteristics.
+```{python}
+#| echo: false
+#| message: false
+#| warning: false
+
+# Create cohorts for all applications to analyze denial rates by loan characteristics
+cohort_query = """
+SELECT
+    low_income_designation,
+    activity_year,
+    action_taken,
+    CAST(loan_amount AS FLOAT) AS loan_amount,
+    CASE 
+        WHEN TRY_CAST(interest_rate AS FLOAT) IS NOT NULL AND TRY_CAST(interest_rate AS FLOAT) > 0 
+        THEN CAST(interest_rate AS FLOAT) 
+        ELSE NULL 
+    END AS interest_rate,
+    applicant_race_1,
+    applicant_ethnicity_1,
+    applicant_sex,
+    co_applicant_race_1,
+    co_applicant_ethnicity_1,
+    co_applicant_sex,
+    CASE 
+        WHEN TRY_CAST(income AS FLOAT) IS NOT NULL AND TRY_CAST(income AS FLOAT) > 0 
+        THEN CAST(income AS FLOAT) 
+        ELSE NULL 
+    END AS applicant_income,
+    debt_to_income_ratio,
+    CASE 
+        WHEN TRY_CAST(property_value AS FLOAT) IS NOT NULL AND TRY_CAST(property_value AS FLOAT) > 0 
+        THEN CAST(property_value AS FLOAT) 
+        ELSE NULL 
+    END AS property_value,
+    county_code,
+    census_tract
+FROM 'hmda_filtered_2022_2024_filtered.parquet'
+WHERE loan_amount IS NOT NULL
+  AND CAST(loan_amount AS FLOAT) > 0
+"""
+
+cohort_df = con_filtered.execute(cohort_query).fetchdf()
+print(f"Cohort analysis data shape: {cohort_df.shape}")
+
+# Create loan amount buckets
+cohort_df['loan_amount_bucket'] = pd.cut(
+    cohort_df['loan_amount'], 
+    bins=[0, 150000, 250000, 350000, 500000, float('inf')], 
+    labels=['$0-150k', '$150k-250k', '$250k-350k', '$350k-500k', '$500k+']
+)
+
+# Create interest rate buckets for loans with rates
+cohort_df['interest_rate_bucket'] = pd.cut(
+    cohort_df['interest_rate'], 
+    bins=[0, 4, 5, 6, 7, float('inf')], 
+    labels=['0-4%', '4-5%', '5-6%', '6-7%', '7%+']
+)
+
+# Create applicant income buckets (convert to numeric first)
+cohort_df['applicant_income_num'] = pd.to_numeric(cohort_df['applicant_income'], errors='coerce')
+cohort_df['income_bucket'] = pd.cut(
+    cohort_df['applicant_income_num'], 
+    bins=[0, 50, 75, 100, 150, float('inf')], 
+    labels=['$0-50k', '$50k-75k', '$75k-100k', '$100k-150k', '$150k+']
+)
+
+print("Cohort buckets created successfully")
+print(f"Loan amount buckets: {cohort_df['loan_amount_bucket'].value_counts()}")
+print(f"Interest rate buckets: {cohort_df['interest_rate_bucket'].value_counts()}")
+
+# Analyze denial rates by loan amount cohorts
+denial_by_loan_amount = cohort_df.groupby(['loan_amount_bucket', 'low_income_designation']).agg({
+    'action_taken': ['count', lambda x: (x == 3).mean() * 100]
+}).round(2)
+denial_by_loan_amount.columns = ['total_applications', 'denial_rate']
+denial_by_loan_amount = denial_by_loan_amount.reset_index()
+
+print("\\nDenial rates by loan amount bucket and low income designation:")
+print(denial_by_loan_amount)
+
+# Visualize denial rates by loan amount cohorts
+plt.figure(figsize=(12, 6))
+sns.barplot(x="loan_amount_bucket", y="denial_rate", hue="low_income_designation", data=denial_by_loan_amount)
+plt.title("Denial Rates by Loan Amount Cohort and Low Income Designation")
+plt.ylabel("Denial Rate (%)")
+plt.xlabel("Loan Amount Bucket")
+plt.legend(title="Low Income Designation")
+plt.xticks(rotation=45)
+plt.show()
+
+# Analyze denial rates by income cohorts  
+denial_by_income = cohort_df.groupby(['income_bucket', 'low_income_designation']).agg({
+    'action_taken': ['count', lambda x: (x == 3).mean() * 100]
+}).round(2)
+denial_by_income.columns = ['total_applications', 'denial_rate']
+denial_by_income = denial_by_income.reset_index()
+denial_by_income = denial_by_income.dropna()  # Remove missing income data
+
+print("\\nDenial rates by income bucket and low income designation:")
+print(denial_by_income)
+
+# Visualize denial rates by income cohorts
+plt.figure(figsize=(12, 6))
+sns.barplot(x="income_bucket", y="denial_rate", hue="low_income_designation", data=denial_by_income)
+plt.title("Denial Rates by Applicant Income Cohort and Low Income Designation")
+plt.ylabel("Denial Rate (%)")
+plt.xlabel("Applicant Income Bucket")
+plt.legend(title="Low Income Designation")
+plt.xticks(rotation=45)
+plt.show()
+
+# Create detailed cohort analysis combining loan amount and income for comprehensive comparison
+detailed_cohorts = cohort_df.groupby(['loan_amount_bucket', 'income_bucket', 'low_income_designation']).agg({
+    'action_taken': ['count', lambda x: (x == 3).mean() * 100],
+    'loan_amount': 'mean'
+}).round(2)
+detailed_cohorts.columns = ['applications', 'denial_rate', 'avg_loan_amount']
+detailed_cohorts = detailed_cohorts.reset_index()
+detailed_cohorts = detailed_cohorts[detailed_cohorts['applications'] >= 10]  # Filter for meaningful sample sizes
+
+print("\\nDetailed cohort analysis (loan amount + income, min 10 applications):")
+print(detailed_cohorts.head(20))
+
+# Analyze interest rate differences for approved loans within cohorts
+approved_loans = cohort_df[cohort_df['action_taken'].isin([1, 2]) & cohort_df['interest_rate'].notna()]
+
+if not approved_loans.empty:
+    rate_by_cohort = approved_loans.groupby(['loan_amount_bucket', 'low_income_designation']).agg({
+        'interest_rate': ['count', 'mean', 'std']
+    }).round(3)
+    rate_by_cohort.columns = ['loan_count', 'avg_interest_rate', 'std_interest_rate']  
+    rate_by_cohort = rate_by_cohort.reset_index()
+    
+    print("\\nAverage interest rates by loan amount cohort for approved loans:")
+    print(rate_by_cohort)
+    
+    # Visualize interest rate differences by cohort
+    plt.figure(figsize=(12, 6))
+    sns.barplot(x="loan_amount_bucket", y="avg_interest_rate", hue="low_income_designation", data=rate_by_cohort)
+    plt.title("Average Interest Rates by Loan Amount Cohort and Low Income Designation")
+    plt.ylabel("Average Interest Rate (%)")
+    plt.xlabel("Loan Amount Bucket")
+    plt.legend(title="Low Income Designation")
+    plt.xticks(rotation=45)
+    plt.show()
+
+print("\\nCohort comparison analysis complete!")
+
+
+```
+
+Follow up
+
+defining cohorts based on variables available
+explore the geographic factors
+bucket granular based on applicant income 
+

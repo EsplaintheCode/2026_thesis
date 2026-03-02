@@ -1,0 +1,384 @@
+'CSV entity value:', 'RELIANT COMMUNITY FEDERAL CREDIT UNION'
+GET https://api.gleif.org/api/v1/fuzzycompletions?field=entity.legalName&q=RELIANT%20COMMUNITY%20FEDERAL%20CREDIT%20UNION: {
+  "Network": {
+    "addresses": {
+      "local": {
+        "address": "172.17.0.2",
+        "family": "IPv4",
+        "port": 42824
+      },
+      "remote": {
+        "address": "193.17.90.130",
+        "family": "IPv4",
+        "port": 443
+      }
+    },
+    "tls": {
+      "reused": true,
+      "authorized": true,
+      "authorizationError": null,
+      "cipher": {
+        "name": "TLS_AES_256_GCM_SHA384",
+        "standardName": "TLS_AES_256_GCM_SHA384",
+        "version": "TLSv1.3"
+      },
+      "protocol": "TLSv1.3",
+      "ephemeralKeyInfo": {
+        "type": "ECDH",
+        "name": "X25519",
+        "size": 253
+      },
+      "peerCertificate": {}
+    }
+  },
+  "Request Headers": {
+    "user-agent": "PostmanRuntime/7.51.1",
+    "accept": "*/*",
+    "cache-control": "no-cache",
+    "postman-token": "5483ba6a-e420-4193-89b6-0a852e20e440",
+    "host": "api.gleif.org",
+    "accept-encoding": "gzip, deflate, br",
+    "connection": "keep-alive"
+  },
+  "Response Headers": {
+    "date": "Wed, 18 Feb 2026 02:43:22 GMT",
+    "content-type": "application/vnd.api+json",
+    "transfer-encoding": "chunked",
+    "cache-control": "private, must-revalidate",
+    "pragma": "no-cache",
+    "expires": "-1",
+    "content-security-policy": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "x-content-security": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "x-webkit-csp": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "strict-transport-security": "max-age=63072000; includeSubdomains; preload",
+    "x-frame-options": "SAMEORIGIN",
+    "x-xss-protection": "1; mode=block",
+    "x-content-type-options": "nosniff",
+    "x-permitted-cross-domain-policies": "none",
+    "x-robots-tag": "all",
+    "x-download-options": "noopen",
+    "set-cookie": "DYNSRV=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; path=/",
+    "alt-svc": "h3=\":443\"; ma=60"
+  },
+  "Response Body": "{\"data\":[{\"type\":\"fuzzycompletions\",\"attributes\":{\"value\":\"RELIANT COMMUNITY FEDERAL CREDIT UNION\"},\"relationships\":{\"lei-records\":{\"data\":{\"type\":\"lei-records\",\"id\":\"549300E3VF26P7719Z56\"},\"links\":{\"related\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/549300E3VF26P7719Z56\"}}}}]}"
+}
+GET https://api.gleif.org/api/v1/lei-records/549300E3VF26P7719Z56: {
+  "Network": {
+    "addresses": {
+      "local": {
+        "address": "172.17.0.2",
+        "family": "IPv4",
+        "port": 34674
+      },
+      "remote": {
+        "address": "193.17.90.130",
+        "family": "IPv4",
+        "port": 443
+      }
+    },
+    "tls": {
+      "reused": true,
+      "authorized": true,
+      "authorizationError": null,
+      "cipher": {
+        "name": "TLS_AES_256_GCM_SHA384",
+        "standardName": "TLS_AES_256_GCM_SHA384",
+        "version": "TLSv1.3"
+      },
+      "protocol": "TLSv1.3",
+      "ephemeralKeyInfo": {
+        "type": "ECDH",
+        "name": "X25519",
+        "size": 253
+      },
+      "peerCertificate": {}
+    }
+  },
+  "Request Headers": {
+    "accept": "application/json",
+    "user-agent": "PostmanRuntime/7.51.1",
+    "cache-control": "no-cache",
+    "postman-token": "433cd913-61d7-4327-b33f-5c6bb2d4cb8f",
+    "host": "api.gleif.org",
+    "accept-encoding": "gzip, deflate, br",
+    "connection": "keep-alive"
+  },
+  "Response Headers": {
+    "date": "Wed, 18 Feb 2026 02:43:23 GMT",
+    "content-type": "application/json",
+    "transfer-encoding": "chunked",
+    "cache-control": "private, must-revalidate",
+    "pragma": "no-cache",
+    "expires": "-1",
+    "content-security-policy": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "x-content-security": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "x-webkit-csp": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "strict-transport-security": "max-age=63072000; includeSubdomains; preload",
+    "x-frame-options": "SAMEORIGIN",
+    "x-xss-protection": "1; mode=block",
+    "x-content-type-options": "nosniff",
+    "x-permitted-cross-domain-policies": "none",
+    "x-robots-tag": "all",
+    "x-download-options": "noopen",
+    "set-cookie": "DYNSRV=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; path=/",
+    "alt-svc": "h3=\":443\"; ma=60"
+  },
+  "Response Body": "{\"meta\":{\"goldenCopy\":{\"publishDate\":\"2026-02-17T16:00:00Z\"}},\"data\":{\"type\":\"lei-records\",\"id\":\"549300E3VF26P7719Z56\",\"attributes\":{\"lei\":\"549300E3VF26P7719Z56\",\"entity\":{\"legalName\":{\"name\":\"RELIANT COMMUNITY FEDERAL CREDIT UNION\",\"language\":\"en\"},\"otherNames\":[],\"transliteratedOtherNames\":[],\"legalAddress\":{\"language\":\"en\",\"addressLines\":[\"10 Benton Pl\"],\"addressNumber\":null,\"addressNumberWithinBuilding\":null,\"mailRouting\":null,\"city\":\"Sodus\",\"region\":\"US-NY\",\"country\":\"US\",\"postalCode\":\"14551-1157\"},\"headquartersAddress\":{\"language\":\"en\",\"addressLines\":[\"10 Benton Pl\"],\"addressNumber\":null,\"addressNumberWithinBuilding\":null,\"mailRouting\":null,\"city\":\"Sodus\",\"region\":\"US-NY\",\"country\":\"US\",\"postalCode\":\"14551-1157\"},\"registeredAt\":{\"id\":\"RA000745\",\"other\":null},\"registeredAs\":\"20258\",\"jurisdiction\":\"US\",\"category\":\"GENERAL\",\"legalForm\":{\"id\":\"14OD\",\"other\":null},\"associatedEntity\":{\"lei\":null,\"name\":null},\"status\":\"ACTIVE\",\"expiration\":{\"date\":null,\"reason\":null},\"successorEntity\":{\"lei\":null,\"name\":null},\"successorEntities\":[],\"creationDate\":\"1970-08-03T00:00:00Z\",\"subCategory\":null,\"otherAddresses\":[],\"eventGroups\":[]},\"registration\":{\"initialRegistrationDate\":\"2016-06-18T01:51:00Z\",\"lastUpdateDate\":\"2025-11-19T20:39:47Z\",\"status\":\"ISSUED\",\"nextRenewalDate\":\"2026-12-06T15:24:00Z\",\"managingLou\":\"5493001KJTIIGC8Y1R12\",\"corroborationLevel\":\"FULLY_CORROBORATED\",\"validatedAt\":{\"id\":\"RA000745\",\"other\":null},\"validatedAs\":\"20258\",\"otherValidationAuthorities\":[]},\"bic\":null,\"mic\":null,\"ocid\":null,\"qcc\":null,\"spglobal\":[\"4563894\"],\"conformityFlag\":\"CONFORMING\"},\"relationships\":{\"managing-lou\":{\"links\":{\"related\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/549300E3VF26P7719Z56\\/managing-lou\"}},\"lei-issuer\":{\"links\":{\"related\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/549300E3VF26P7719Z56\\/lei-issuer\"}},\"field-modifications\":{\"links\":{\"related\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/549300E3VF26P7719Z56\\/field-modifications\"}},\"direct-parent\":{\"links\":{\"reporting-exception\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/549300E3VF26P7719Z56\\/direct-parent-reporting-exception\"}},\"ultimate-parent\":{\"links\":{\"reporting-exception\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/549300E3VF26P7719Z56\\/ultimate-parent-reporting-exception\"}}},\"links\":{\"self\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/549300E3VF26P7719Z56\"}}}"
+}
+'{"source_address":"RELIANT COMMUNITY FEDERAL CREDIT UNION","matched_address":"RELIANT COMMUNITY FEDERAL CREDIT UNION","lei":"549300E3VF26P7719Z56","entity_name":"RELIANT COMMUNITY FEDERAL CREDIT UNION","lei_record_url":"https://api.gleif.org/api/v1/lei-records/549300E3VF26P7719Z56","error":null}'
+'CSV entity value:', 'CARIBE FEDERAL CREDIT UNION'
+GET https://api.gleif.org/api/v1/fuzzycompletions?field=entity.legalName&q=CARIBE%20FEDERAL%20CREDIT%20UNION: {
+  "Network": {
+    "addresses": {
+      "local": {
+        "address": "172.17.0.2",
+        "family": "IPv4",
+        "port": 42824
+      },
+      "remote": {
+        "address": "193.17.90.130",
+        "family": "IPv4",
+        "port": 443
+      }
+    },
+    "tls": {
+      "reused": true,
+      "authorized": true,
+      "authorizationError": null,
+      "cipher": {
+        "name": "TLS_AES_256_GCM_SHA384",
+        "standardName": "TLS_AES_256_GCM_SHA384",
+        "version": "TLSv1.3"
+      },
+      "protocol": "TLSv1.3",
+      "ephemeralKeyInfo": {
+        "type": "ECDH",
+        "name": "X25519",
+        "size": 253
+      },
+      "peerCertificate": {}
+    }
+  },
+  "Request Headers": {
+    "user-agent": "PostmanRuntime/7.51.1",
+    "accept": "*/*",
+    "cache-control": "no-cache",
+    "postman-token": "5a646a92-ec3c-4654-9b36-a1b288308c78",
+    "host": "api.gleif.org",
+    "accept-encoding": "gzip, deflate, br",
+    "connection": "keep-alive"
+  },
+  "Response Headers": {
+    "date": "Wed, 18 Feb 2026 02:43:23 GMT",
+    "content-type": "application/vnd.api+json",
+    "transfer-encoding": "chunked",
+    "cache-control": "private, must-revalidate",
+    "pragma": "no-cache",
+    "expires": "-1",
+    "content-security-policy": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "x-content-security": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "x-webkit-csp": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "strict-transport-security": "max-age=63072000; includeSubdomains; preload",
+    "x-frame-options": "SAMEORIGIN",
+    "x-xss-protection": "1; mode=block",
+    "x-content-type-options": "nosniff",
+    "x-permitted-cross-domain-policies": "none",
+    "x-robots-tag": "all",
+    "x-download-options": "noopen",
+    "set-cookie": "DYNSRV=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; path=/",
+    "alt-svc": "h3=\":443\"; ma=60"
+  },
+  "Response Body": "{\"data\":[{\"type\":\"fuzzycompletions\",\"attributes\":{\"value\":\"CARIBE FEDERAL CREDIT UNION\"},\"relationships\":{\"lei-records\":{\"data\":{\"type\":\"lei-records\",\"id\":\"254900KMMJNL0IJNSM73\"},\"links\":{\"related\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/254900KMMJNL0IJNSM73\"}}}}]}"
+}
+GET https://api.gleif.org/api/v1/lei-records/254900KMMJNL0IJNSM73: {
+  "Network": {
+    "addresses": {
+      "local": {
+        "address": "172.17.0.2",
+        "family": "IPv4",
+        "port": 34674
+      },
+      "remote": {
+        "address": "193.17.90.130",
+        "family": "IPv4",
+        "port": 443
+      }
+    },
+    "tls": {
+      "reused": true,
+      "authorized": true,
+      "authorizationError": null,
+      "cipher": {
+        "name": "TLS_AES_256_GCM_SHA384",
+        "standardName": "TLS_AES_256_GCM_SHA384",
+        "version": "TLSv1.3"
+      },
+      "protocol": "TLSv1.3",
+      "ephemeralKeyInfo": {
+        "type": "ECDH",
+        "name": "X25519",
+        "size": 253
+      },
+      "peerCertificate": {}
+    }
+  },
+  "Request Headers": {
+    "accept": "application/json",
+    "user-agent": "PostmanRuntime/7.51.1",
+    "cache-control": "no-cache",
+    "postman-token": "67df7379-90eb-4e0e-aa78-15631b130e71",
+    "host": "api.gleif.org",
+    "accept-encoding": "gzip, deflate, br",
+    "connection": "keep-alive"
+  },
+  "Response Headers": {
+    "date": "Wed, 18 Feb 2026 02:43:23 GMT",
+    "content-type": "application/json",
+    "transfer-encoding": "chunked",
+    "cache-control": "private, must-revalidate",
+    "pragma": "no-cache",
+    "expires": "-1",
+    "content-security-policy": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "x-content-security": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "x-webkit-csp": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "strict-transport-security": "max-age=63072000; includeSubdomains; preload",
+    "x-frame-options": "SAMEORIGIN",
+    "x-xss-protection": "1; mode=block",
+    "x-content-type-options": "nosniff",
+    "x-permitted-cross-domain-policies": "none",
+    "x-robots-tag": "all",
+    "x-download-options": "noopen",
+    "set-cookie": "DYNSRV=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; path=/",
+    "alt-svc": "h3=\":443\"; ma=60"
+  },
+  "Response Body": "{\"meta\":{\"goldenCopy\":{\"publishDate\":\"2026-02-17T16:00:00Z\"}},\"data\":{\"type\":\"lei-records\",\"id\":\"254900KMMJNL0IJNSM73\",\"attributes\":{\"lei\":\"254900KMMJNL0IJNSM73\",\"entity\":{\"legalName\":{\"name\":\"CARIBE FEDERAL CREDIT UNION\",\"language\":\"es\"},\"otherNames\":[],\"transliteratedOtherNames\":[],\"legalAddress\":{\"language\":\"en\",\"addressLines\":[\"195 Calle Oneill\"],\"addressNumber\":null,\"addressNumberWithinBuilding\":null,\"mailRouting\":null,\"city\":\"San Juan\",\"region\":null,\"country\":\"PR\",\"postalCode\":\"00918-2404\"},\"headquartersAddress\":{\"language\":\"en\",\"addressLines\":[\"195 Calle Oneill\"],\"addressNumber\":null,\"addressNumberWithinBuilding\":null,\"mailRouting\":null,\"city\":\"San Juan\",\"region\":null,\"country\":\"PR\",\"postalCode\":\"00918-2404\"},\"registeredAt\":{\"id\":\"RA000745\",\"other\":null},\"registeredAs\":\"7345\",\"jurisdiction\":\"PR\",\"category\":\"GENERAL\",\"legalForm\":{\"id\":\"I6FV\",\"other\":null},\"associatedEntity\":{\"lei\":null,\"name\":null},\"status\":\"ACTIVE\",\"expiration\":{\"date\":null,\"reason\":null},\"successorEntity\":{\"lei\":null,\"name\":null},\"successorEntities\":[],\"creationDate\":\"1951-01-01T00:00:00Z\",\"subCategory\":null,\"otherAddresses\":[],\"eventGroups\":[]},\"registration\":{\"initialRegistrationDate\":\"2018-02-13T16:06:11Z\",\"lastUpdateDate\":\"2026-01-09T17:45:39Z\",\"status\":\"ISSUED\",\"nextRenewalDate\":\"2027-01-19T14:25:00Z\",\"managingLou\":\"5493001KJTIIGC8Y1R12\",\"corroborationLevel\":\"FULLY_CORROBORATED\",\"validatedAt\":{\"id\":\"RA000745\",\"other\":null},\"validatedAs\":\"7345\",\"otherValidationAuthorities\":[]},\"bic\":null,\"mic\":null,\"ocid\":null,\"qcc\":null,\"spglobal\":[\"114454913\"],\"conformityFlag\":\"NON_CONFORMING\"},\"relationships\":{\"managing-lou\":{\"links\":{\"related\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/254900KMMJNL0IJNSM73\\/managing-lou\"}},\"lei-issuer\":{\"links\":{\"related\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/254900KMMJNL0IJNSM73\\/lei-issuer\"}},\"field-modifications\":{\"links\":{\"related\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/254900KMMJNL0IJNSM73\\/field-modifications\"}},\"direct-parent\":{\"links\":{\"reporting-exception\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/254900KMMJNL0IJNSM73\\/direct-parent-reporting-exception\"}},\"ultimate-parent\":{\"links\":{\"reporting-exception\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/254900KMMJNL0IJNSM73\\/ultimate-parent-reporting-exception\"}}},\"links\":{\"self\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/254900KMMJNL0IJNSM73\"}}}"
+}
+'{"source_address":"CARIBE FEDERAL CREDIT UNION","matched_address":"CARIBE FEDERAL CREDIT UNION","lei":"254900KMMJNL0IJNSM73","entity_name":"CARIBE FEDERAL CREDIT UNION","lei_record_url":"https://api.gleif.org/api/v1/lei-records/254900KMMJNL0IJNSM73","error":null}'
+'CSV entity value:', 'Air Academy Federal Credit Union'
+GET https://api.gleif.org/api/v1/fuzzycompletions?field=entity.legalName&q=Air%20Academy%20Federal%20Credit%20Union: {
+  "Network": {
+    "addresses": {
+      "local": {
+        "address": "172.17.0.2",
+        "family": "IPv4",
+        "port": 56614
+      },
+      "remote": {
+        "address": "193.17.90.130",
+        "family": "IPv4",
+        "port": 443
+      }
+    },
+    "tls": {
+      "reused": true,
+      "authorized": true,
+      "authorizationError": null,
+      "cipher": {
+        "name": "TLS_AES_256_GCM_SHA384",
+        "standardName": "TLS_AES_256_GCM_SHA384",
+        "version": "TLSv1.3"
+      },
+      "protocol": "TLSv1.3",
+      "ephemeralKeyInfo": {
+        "type": "ECDH",
+        "name": "X25519",
+        "size": 253
+      },
+      "peerCertificate": {}
+    }
+  },
+  "Request Headers": {
+    "user-agent": "PostmanRuntime/7.51.1",
+    "accept": "*/*",
+    "cache-control": "no-cache",
+    "postman-token": "f6870c6f-9e28-4576-a5a9-caf957ca8d68",
+    "host": "api.gleif.org",
+    "accept-encoding": "gzip, deflate, br",
+    "connection": "keep-alive"
+  },
+  "Response Headers": {
+    "date": "Wed, 18 Feb 2026 02:43:24 GMT",
+    "content-type": "application/vnd.api+json",
+    "transfer-encoding": "chunked",
+    "cache-control": "private, must-revalidate",
+    "pragma": "no-cache",
+    "expires": "-1",
+    "content-security-policy": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "x-content-security": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "x-webkit-csp": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "strict-transport-security": "max-age=63072000; includeSubdomains; preload",
+    "x-frame-options": "SAMEORIGIN",
+    "x-xss-protection": "1; mode=block",
+    "x-content-type-options": "nosniff",
+    "x-permitted-cross-domain-policies": "none",
+    "x-robots-tag": "all",
+    "x-download-options": "noopen",
+    "set-cookie": "DYNSRV=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; path=/",
+    "alt-svc": "h3=\":443\"; ma=60"
+  },
+  "Response Body": "{\"data\":[{\"type\":\"fuzzycompletions\",\"attributes\":{\"value\":\"Air Academy Federal Credit Union\"},\"relationships\":{\"lei-records\":{\"data\":{\"type\":\"lei-records\",\"id\":\"549300ELXS6PBT8OEE44\"},\"links\":{\"related\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/549300ELXS6PBT8OEE44\"}}}}]}"
+}
+GET https://api.gleif.org/api/v1/lei-records/549300ELXS6PBT8OEE44: {
+  "Network": {
+    "addresses": {
+      "local": {
+        "address": "172.17.0.2",
+        "family": "IPv4",
+        "port": 34674
+      },
+      "remote": {
+        "address": "193.17.90.130",
+        "family": "IPv4",
+        "port": 443
+      }
+    },
+    "tls": {
+      "reused": true,
+      "authorized": true,
+      "authorizationError": null,
+      "cipher": {
+        "name": "TLS_AES_256_GCM_SHA384",
+        "standardName": "TLS_AES_256_GCM_SHA384",
+        "version": "TLSv1.3"
+      },
+      "protocol": "TLSv1.3",
+      "ephemeralKeyInfo": {
+        "type": "ECDH",
+        "name": "X25519",
+        "size": 253
+      },
+      "peerCertificate": {}
+    }
+  },
+  "Request Headers": {
+    "accept": "application/json",
+    "user-agent": "PostmanRuntime/7.51.1",
+    "cache-control": "no-cache",
+    "postman-token": "2bfd303f-f85d-4906-873f-c2e1b48e1c68",
+    "host": "api.gleif.org",
+    "accept-encoding": "gzip, deflate, br",
+    "connection": "keep-alive"
+  },
+  "Response Headers": {
+    "date": "Wed, 18 Feb 2026 02:43:24 GMT",
+    "content-type": "application/json",
+    "transfer-encoding": "chunked",
+    "cache-control": "private, must-revalidate",
+    "pragma": "no-cache",
+    "expires": "-1",
+    "content-security-policy": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "x-content-security": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "x-webkit-csp": "default-src 'self' 'unsafe-inline' https://*.gleif.org;",
+    "strict-transport-security": "max-age=63072000; includeSubdomains; preload",
+    "x-frame-options": "SAMEORIGIN",
+    "x-xss-protection": "1; mode=block",
+    "x-content-type-options": "nosniff",
+    "x-permitted-cross-domain-policies": "none",
+    "x-robots-tag": "all",
+    "x-download-options": "noopen",
+    "set-cookie": "DYNSRV=; Expires=Thu, 01-Jan-1970 00:00:01 GMT; path=/",
+    "alt-svc": "h3=\":443\"; ma=60"
+  },
+  "Response Body": "{\"meta\":{\"goldenCopy\":{\"publishDate\":\"2026-02-17T16:00:00Z\"}},\"data\":{\"type\":\"lei-records\",\"id\":\"549300ELXS6PBT8OEE44\",\"attributes\":{\"lei\":\"549300ELXS6PBT8OEE44\",\"entity\":{\"legalName\":{\"name\":\"Air Academy Federal Credit Union\",\"language\":\"en\"},\"otherNames\":[],\"transliteratedOtherNames\":[],\"legalAddress\":{\"language\":\"en\",\"addressLines\":[\"9810 N Union Blvd\"],\"addressNumber\":null,\"addressNumberWithinBuilding\":null,\"mailRouting\":null,\"city\":\"Colorado Springs\",\"region\":\"US-CO\",\"country\":\"US\",\"postalCode\":\"80924\"},\"headquartersAddress\":{\"language\":\"en\",\"addressLines\":[\"9810 N Union Blvd\"],\"addressNumber\":null,\"addressNumberWithinBuilding\":null,\"mailRouting\":null,\"city\":\"Colorado Springs\",\"region\":\"US-CO\",\"country\":\"US\",\"postalCode\":\"80924\"},\"registeredAt\":{\"id\":\"RA000745\",\"other\":null},\"registeredAs\":\"10600\",\"jurisdiction\":\"US\",\"category\":\"GENERAL\",\"legalForm\":{\"id\":\"14OD\",\"other\":null},\"associatedEntity\":{\"lei\":null,\"name\":null},\"status\":\"ACTIVE\",\"expiration\":{\"date\":null,\"reason\":null},\"successorEntity\":{\"lei\":null,\"name\":null},\"successorEntities\":[],\"creationDate\":\"1955-10-25T00:00:00Z\",\"subCategory\":null,\"otherAddresses\":[],\"eventGroups\":[{\"groupType\":\"STANDALONE\",\"events\":[{\"validationDocuments\":\"ACCOUNTS_FILING\",\"effectiveDate\":\"2024-12-06T00:00:00Z\",\"recordedDate\":\"2024-12-06T22:59:36Z\",\"type\":\"CHANGE_LEGAL_FORM\",\"status\":\"COMPLETED\"}]},{\"groupType\":\"STANDALONE\",\"events\":[{\"validationDocuments\":\"REGULATORY_FILING\",\"effectiveDate\":\"2023-02-01T00:00:00Z\",\"recordedDate\":\"2024-12-06T22:59:36Z\",\"type\":\"CHANGE_OTHER_NAMES\",\"status\":\"COMPLETED\"}]}]},\"registration\":{\"initialRegistrationDate\":\"2017-08-03T01:58:00Z\",\"lastUpdateDate\":\"2025-11-19T12:21:20Z\",\"status\":\"ISSUED\",\"nextRenewalDate\":\"2026-12-09T14:21:12Z\",\"managingLou\":\"5493001KJTIIGC8Y1R12\",\"corroborationLevel\":\"FULLY_CORROBORATED\",\"validatedAt\":{\"id\":\"RA000745\",\"other\":null},\"validatedAs\":\"10600\",\"otherValidationAuthorities\":[]},\"bic\":null,\"mic\":null,\"ocid\":null,\"qcc\":null,\"spglobal\":[\"4582550\"],\"conformityFlag\":\"CONFORMING\"},\"relationships\":{\"managing-lou\":{\"links\":{\"related\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/549300ELXS6PBT8OEE44\\/managing-lou\"}},\"lei-issuer\":{\"links\":{\"related\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/549300ELXS6PBT8OEE44\\/lei-issuer\"}},\"field-modifications\":{\"links\":{\"related\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/549300ELXS6PBT8OEE44\\/field-modifications\"}},\"direct-parent\":{\"links\":{\"reporting-exception\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/549300ELXS6PBT8OEE44\\/direct-parent-reporting-exception\"}},\"ultimate-parent\":{\"links\":{\"reporting-exception\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/549300ELXS6PBT8OEE44\\/ultimate-parent-reporting-exception\"}}},\"links\":{\"self\":\"https:\\/\\/api.gleif.org\\/api\\/v1\\/lei-records\\/549300ELXS6PBT8OEE44\"}}}"
+}
+'{"source_address":"Air Academy Federal Credit Union","matched_address":"Air Academy Federal Credit Union","lei":"549300ELXS6PBT8OEE44","entity_name":"Air Academy Federal Credit Union","lei_record_url":"https://api.gleif.org/api/v1/lei-records/549300ELXS6PBT8OEE44","error":null}'
