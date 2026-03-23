@@ -141,7 +141,7 @@ print(f"- Columns excluded: {len(exclude_cols)}")
 #| message: false
 #| warning: false
 
-# Filter the data to focus on conventional, owner-occupied, first-lien loans for 1-4 family properties for home purchases, action taken 1 loan originated, 2 approved not accepted, 3 denied, excludes reverse mortgage, not an open end line of credit, and not a manufactured home loan
+# Filter the data: conventional, owner-occupied, first-lien loans for 1-4 family properties for home purchases, action taken 1 loan originated, 2 approved not accepted, 3 denied, excludes reverse mortgage, not an open end line of credit, and not a manufactured home loan
 
 con.execute("""
 COPY (
@@ -160,13 +160,10 @@ COPY (
 ) TO 'hmda_filtered_2022_2024_filtered.parquet' (FORMAT PARQUET);
 """)
 
-# print the first 1000 records of the filtered data to confirm it worked
-filtered_sample = con.execute("SELECT * FROM 'hmda_filtered_2022_2024_filtered.parquet' LIMIT 1000").fetchdf()  
-print(f"filtered_sample:\n{filtered_sample}")
 
 ```
 
-### List the columns name, data types, null counts from FILTER data
+### Data clean up: columns name, data types, null counts from FILTER data
 
 ```{python}
 #| echo: false
@@ -179,12 +176,11 @@ import pandas as pd
 
 con_filtered = duckdb.connect()
 
-# Get column information from the filtered dataset
 
-# Get basic column info (name, type)
+# basic column info (name, type)
 columns_info = con_filtered.execute("DESCRIBE SELECT * FROM 'hmda_filtered_2022_2024_filtered.parquet' LIMIT 0").fetchall()
 
-# Get row count for calculating null percentages
+# row count for calculating null percentages
 total_rows = con_filtered.execute("SELECT COUNT(*) FROM 'hmda_filtered_2022_2024_filtered.parquet'").fetchone()[0]
 
 print(f"Total records in filtered dataset: {total_rows:,}")
@@ -235,8 +231,6 @@ print(f"\nTotal columns: {len(columns_info)}")
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-
-
 # Summarize columns by low income designation, denial rates (not count), pricing outcomes for each year and between low income designation
 summary_query = """
 SELECT
@@ -247,16 +241,28 @@ SELECT
     AVG(CASE WHEN action_taken IN (1, 2) THEN 1 ELSE 0 END) * 100.0 AS approval_rate,
     AVG(CASE WHEN action_taken IN (1, 2) THEN CAST(loan_amount AS FLOAT) END) AS avg_loan_amount
 FROM 'hmda_filtered_2022_2024_filtered.parquet'
--- Grouping by low income designation and activity_year for comparison
+
 GROUP BY low_income_designation, activity_year
 ORDER BY low_income_designation, activity_year
 """
 
+# Execute the query to create summary_df
 summary_df = con_filtered.execute(summary_query).fetchdf()
-print(summary_df) 
+
+# Display summary statistics
+print("Summary Statistics by Low Income Designation and Year:")
+print(summary_df)
+
 ```
 
 ### Denial Rates & Loan Amount Distributions by Low Income Designation and Year
+
+Findings
+--- Graph 1: Approval rates are consistently high (80%+) across both credit union types, but Low Income Designated Credit Unions show slightly lower approval rates in most years
+--- Graph 2: Loan amount distributions reveal significant differences: Non-Low Income Designated CUs approve larger loan amounts on average, with distributions skewed toward higher values (this is expected)
+--- Graph 3: The box plot analysis shows Non-Low Income CUs have higher median loan amounts and greater variability in approved loan sizes
+--- Implications: This suggests potential access barriers for borrowers seeking larger loans at Low Income Designated institutions, possibly due to capital constraints or more conservative lending practices.
+
 
 ```{python}
 #| echo: false
@@ -295,6 +301,9 @@ ORDER BY low_income_designation, activity_year
 # Execute the query to create loan_df
 loan_df = con_filtered.execute(loan_distribution_query).fetchdf()
 
+# Define consistent bin edges for loan amounts (same bins for all comparisons)
+loan_amount_bins = list(range(0, 2000001, 50000))  # $0 to $2M in $50K increments (40 bins)
+
 # Histogram plot showing loan amount distributions by low income designation and year for approved loans
 
 plt.figure(figsize=(12,8))
@@ -305,7 +314,7 @@ for i, year in enumerate(years):
     
     for designation in sorted(year_data['low_income_designation'].unique()):
         designation_data = year_data[year_data['low_income_designation'] == designation]
-        plt.hist(designation_data['loan_amount'], bins=30, alpha=0.7, 
+        plt.hist(designation_data['loan_amount'], bins=loan_amount_bins, alpha=0.7, 
                 label=f'{designation}', density=True, edgecolor='black', linewidth=0.5)
     
     plt.title(f'Approved Loan Amount Distribution - {year}')
@@ -339,7 +348,7 @@ for i, year in enumerate(sorted(loan_df['activity_year'].unique())):
     year_data = loan_df[loan_df['activity_year'] == year]
     for designation in year_data['low_income_designation'].unique():
         designation_data = year_data[year_data['low_income_designation'] == designation]
-        plt.hist(designation_data['loan_amount'], bins=50, alpha=0.6, 
+        plt.hist(designation_data['loan_amount'], bins=loan_amount_bins, alpha=0.6, 
                 label=designation, density=True)
     plt.title(f'Approved Loan Amount Distribution - {year}')
     plt.xlabel('Loan Amount ($)')
@@ -350,16 +359,34 @@ for i, year in enumerate(sorted(loan_df['activity_year'].unique())):
 
 plt.tight_layout()
 plt.show()
+
+
 ```
 
 ### Interest Rate Spread Distributions by Low Income Designation and Year
+
+Key Findings
+- **Interest rate medians are equivalent** between Low Income Designated and Non-Low Income Designated CUs across all years (2022-2024)
+- **Box plot analysis reveals similar distribution patterns** with overlapping quartile ranges indicating comparable pricing practices
+- **No evidence of systematic rate premiums** at Low Income Designated institutions contrary to initial fairness drift hypothesis
+- **Rate similarity persists across years**, suggesting consistent competitive pricing between institution types
+
+**Implications for Community Development Assessment:**
+- **No pricing disadvantage identified**: Low Income Designated CUs do not impose higher borrowing costs on their communities
+
+
 
 ```{python}
 #| echo: false
 #| message: false
 #| warning: false
 
-# Pricing (interest rates) analysis by low income designation and year for approved loans
+# Initialize database connection if not already done
+import duckdb
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 pricing_query = """
 SELECT
     low_income_designation,
@@ -374,16 +401,68 @@ ORDER BY low_income_designation, activity_year
 """
 pricing_df = con_filtered.execute(pricing_query).fetchdf()
 
+# Diagnostic: Check what's actually in the data
+print("=== DIAGNOSTIC: Interest Rate Data Check ===")
+print(f"Total records: {len(pricing_df):,}")
+print(f"Unique values in low_income_designation: {sorted(pricing_df['low_income_designation'].unique())}")
+print(f"\nBreakdown by designation:")
+for designation in sorted(pricing_df['low_income_designation'].unique()):
+    subset = pricing_df[pricing_df['low_income_designation'] == designation]
+    print(f"  {designation}: {len(subset):,} records")
+    print(f"    Interest rate range: {subset['interest_rate'].min():.4f}% to {subset['interest_rate'].max():.4f}%")
+    print(f"    Median: {subset['interest_rate'].median():.8f}%")
+    print(f"    Mean: {subset['interest_rate'].mean():.8f}%")
+
+print(f"\nBreakdown by designation and year:")
+for year in sorted(pricing_df['activity_year'].unique()):
+    print(f"\n--- {year} ---")
+    year_data = pricing_df[pricing_df['activity_year'] == year]
+    for designation in sorted(year_data['low_income_designation'].unique()):
+        subset = year_data[year_data['low_income_designation'] == designation]
+        if len(subset) > 0:
+            print(f"  {designation}: n={len(subset):,}, median={subset['interest_rate'].median():.8f}%")
+
+# Sample data check
+print(f"\nSample of data:")
+print(pricing_df.groupby('low_income_designation')['interest_rate'].head(3))
+
 # Visualize pricing distributions by low income designation and year using box plots
 plt.figure(figsize=(15,9))
-sns.boxplot(x="activity_year", y="interest_rate", hue="low_income_designation", data=pricing_df)
+ax = sns.boxplot(x="activity_year", y="interest_rate", hue="low_income_designation", data=pricing_df)
 plt.title("Distribution of Interest Rates by Low Income Designation and Year - Approved/Originated Loans")
 plt.ylabel("Interest Rate (%)")
 plt.xlabel("Year")
 plt.legend(title="Low Income Designation")
 plt.ylim(0, 15)
 plt.xticks(rotation=0)
+
+# Add quartile labels
+for i, year in enumerate(sorted(pricing_df['activity_year'].unique())):
+    for j, designation in enumerate(sorted(pricing_df['low_income_designation'].unique())):
+        year_designation_data = pricing_df[
+            (pricing_df['activity_year'] == year) & 
+            (pricing_df['low_income_designation'] == designation)
+        ]['interest_rate']
+        
+        if len(year_designation_data) > 0:
+            q1 = year_designation_data.quantile(0.25)
+            median = year_designation_data.median()
+            q3 = year_designation_data.quantile(0.75)
+            
+            # Position labels (offset for multiple designations)
+            x_pos = i + (j - 0.5) * 0.4
+            
+            # Add quartile text labels
+            ax.text(x_pos, q3 + 0.1, f'Q3: {q3:.6f}%', ha='center', va='bottom', 
+                   fontsize=8, fontweight='bold', color='darkblue')
+            ax.text(x_pos, median + 0.05, f'Med: {median:.6f}%', ha='center', va='bottom', 
+                   fontsize=8, fontweight='bold', color='darkblue')
+            ax.text(x_pos, q1 - 0.1, f'Q1: {q1:.6f}%', ha='center', va='top', 
+                   fontsize=8, fontweight='bold', color='darkblue')
+
 plt.show()  
+
+
 ```
 
 ### Applicant Income Distribution
@@ -585,6 +664,20 @@ for year in years:
 #| message: false
 #| warning: false
 
+# Import required packages
+import duckdb
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Initialize database connection if not already done
+try:
+    # Test if con_filtered exists and is working
+    con_filtered.execute("SELECT 1").fetchone()
+except (NameError, AttributeError):
+    # Create new connection if it doesn't exist
+    con_filtered = duckdb.connect()
+
 # Interest rates by income buckets
 income_rates_query = """
 SELECT
@@ -623,7 +716,7 @@ print(f"Total approved loans with valid income and rate data: {len(income_rates_
 
 # Box plot showing interest rates by income bucket and credit union type
 plt.figure(figsize=(16, 8))
-sns.boxplot(x='income_bucket', y='interest_rate', hue='low_income_designation', 
+ax = sns.boxplot(x='income_bucket', y='interest_rate', hue='low_income_designation', 
             data=income_rates_df, palette=['steelblue', 'coral'])
 plt.title('Interest Rates by Income Bucket and Credit Union Type', fontsize=14, fontweight='bold')
 plt.xlabel('Income Bucket', fontsize=12)
@@ -632,6 +725,32 @@ plt.ylim(2, 8)
 plt.legend(title='Low Income Designation', fontsize=11)
 plt.xticks(rotation=45)
 plt.grid(True, alpha=0.3)
+
+# Add quartile labels
+for i, bucket in enumerate(income_rates_df['income_bucket'].cat.categories):
+    for j, designation in enumerate(sorted(income_rates_df['low_income_designation'].unique())):
+        bucket_designation_data = income_rates_df[
+            (income_rates_df['income_bucket'] == bucket) & 
+            (income_rates_df['low_income_designation'] == designation)
+        ]['interest_rate']
+        
+        if len(bucket_designation_data) > 10:  # Only show labels for buckets with sufficient data
+            q1 = bucket_designation_data.quantile(0.25)
+            median = bucket_designation_data.median()
+            q3 = bucket_designation_data.quantile(0.75)
+            
+            # Position labels (offset for multiple designations)
+            x_pos = i + (j - 0.5) * 0.4
+            
+            # Add quartile text labels
+            ax.text(x_pos, q3 + 0.05, f'Q3: {q3:.3f}%', ha='center', va='bottom', 
+                   fontsize=8, fontweight='bold', color='darkblue')
+            ax.text(x_pos, median, f'{median:.3f}%', ha='center', va='center', 
+                   fontsize=8, fontweight='bold', color='white', 
+                   bbox=dict(boxstyle='round,pad=0.2', facecolor='red', alpha=0.8))
+            ax.text(x_pos, q1 - 0.05, f'Q1: {q1:.3f}%', ha='center', va='top', 
+                   fontsize=8, fontweight='bold', color='darkblue')
+
 plt.tight_layout()
 plt.show()
 
@@ -641,12 +760,12 @@ avg_rates.columns = ['count', 'avg_rate']
 avg_rates = avg_rates.reset_index()
 avg_rates = avg_rates[avg_rates['count'] >= 10]  # Minimum sample size
 
-print("\nAverage Interest Rates by Income Bucket:")
+print("\nAverage Interest Rates of Approved Loans by Income Bucket:")
 print(avg_rates)
 
 # Bar plot of average interest rates
 plt.figure(figsize=(14, 7))
-sns.barplot(x='income_bucket', y='avg_rate', hue='low_income_designation', 
+ax = sns.barplot(x='income_bucket', y='avg_rate', hue='low_income_designation', 
             data=avg_rates, palette=['steelblue', 'coral'])
 plt.title('Average Interest Rates by Income Bucket and Credit Union Type', fontsize=14, fontweight='bold')
 plt.xlabel('Income Bucket', fontsize=12)
@@ -655,6 +774,63 @@ plt.ylim(2, 8)
 plt.legend(title='Low Income Designation', fontsize=11)
 plt.xticks(rotation=45)
 plt.grid(True, alpha=0.3)
+
+# Add data labels on the bars
+for i, bucket in enumerate(avg_rates['income_bucket'].unique()):
+    bucket_data = avg_rates[avg_rates['income_bucket'] == bucket]
+    for j, (idx, row) in enumerate(bucket_data.iterrows()):
+        # Position bars (offset for multiple designations)
+        x_pos = i + (j - 0.5) * 0.4
+        rate_value = row['avg_rate']
+        
+        # Add rate value on top of bar
+        ax.text(x_pos, rate_value + 0.05, f'{rate_value:.3f}%', 
+               ha='center', va='bottom', fontsize=9, fontweight='bold', color='black')
+        
+        # Add sample size below the rate
+        ax.text(x_pos, rate_value - 0.15, f'n={row["count"]}', 
+               ha='center', va='top', fontsize=8, style='italic', color='gray')
+
+plt.tight_layout()
+plt.show()
+
+# Median interest rates by income bucket
+median_rates = income_rates_df.groupby(['income_bucket', 'low_income_designation'])['interest_rate'].agg(['count', 'median']).round(3)
+median_rates.columns = ['count', 'median_rate']
+median_rates = median_rates.reset_index()
+median_rates = median_rates[median_rates['count'] >= 10]  # Minimum sample size
+
+print("\nMedian Interest Rates of Approved Loans by Income Bucket:")
+print(median_rates)
+
+# Bar plot of median interest rates
+plt.figure(figsize=(14, 7))
+ax = sns.barplot(x='income_bucket', y='median_rate', hue='low_income_designation', 
+            data=median_rates, palette=['steelblue', 'coral'])
+plt.title('Median Interest Rates by Income Bucket and Credit Union Type', fontsize=14, fontweight='bold')
+plt.xlabel('Income Bucket', fontsize=12)
+plt.ylabel('Median Interest Rate (%)', fontsize=12)
+plt.ylim(2, 8)
+plt.legend(title='Low Income Designation', fontsize=11)
+plt.xticks(rotation=45)
+plt.grid(True, alpha=0.3)
+
+# Add data labels on the bars
+for i, bucket in enumerate(median_rates['income_bucket'].unique()):
+    bucket_data = median_rates[median_rates['income_bucket'] == bucket]
+    for j, (idx, row) in enumerate(bucket_data.iterrows()):
+        # Position bars (offset for multiple designations)
+        x_pos = i + (j - 0.5) * 0.4
+        rate_value = row['median_rate']
+        
+        # Add rate value on top of bar
+        ax.text(x_pos, rate_value + 0.05, f'{rate_value:.3f}%', 
+               ha='center', va='bottom', fontsize=9, fontweight='bold', color='black')
+        
+        # Add sample size below the rate
+        ax.text(x_pos, rate_value - 0.15, f'n={row["count"]}', 
+               ha='center', va='top', fontsize=8, style='italic', color='black')
+
 plt.tight_layout()
 plt.show()
 
@@ -667,6 +843,14 @@ plt.show()
 #| echo: false
 #| message: false
 #| warning: false
+
+# Initialize database connection if not already done
+try:
+    # Test if con_filtered exists and is working
+    con_filtered.execute("SELECT 1").fetchone()
+except (NameError, AttributeError):
+    # Create new connection if it doesn't exist
+    con_filtered = duckdb.connect()
 
 # Get comprehensive loan data for matching analysis
 similar_loans_query = """
@@ -815,7 +999,7 @@ if len(matched_loans) > 0:
         rate_pivot = rate_pivot.rename(columns={'0': 'Non-Low_Income_CU', '1': 'Low_Income_CU'})
         
         print("\nInterest Rate Comparison for Similar Loan Profiles:")
-        print("(Positive difference = Low Income CUs charge higher rates)")
+        print("(Positive difference = Low Income CUs charge higher rates, Negative = lower rates)")
         print(rate_pivot.sort_values('Abs_Difference', ascending=False))
         
         # Summary statistics
@@ -825,6 +1009,20 @@ if len(matched_loans) > 0:
         print(f"Standard deviation: {rate_pivot['Rate_Difference'].std():.3f} percentage points")
         print(f"Cohorts where Low Income CUs charge more: {(rate_pivot['Rate_Difference'] > 0).sum()}")
         print(f"Cohorts where Low Income CUs charge less: {(rate_pivot['Rate_Difference'] < 0).sum()}")
+        
+        # Assess magnitude of differences
+        avg_diff = abs(rate_pivot['Rate_Difference'].mean())
+        median_diff = abs(rate_pivot['Rate_Difference'].median())
+        print(f"\n=== ASSESSMENT ====") 
+        if avg_diff < 0.05 and median_diff < 0.05:
+            print(f"FINDING: Rate differences are minimal (<0.05 percentage points on average)")
+            print(f"IMPLICATION: No evidence of systematic pricing discrimination between CU types")
+        elif avg_diff < 0.1 and median_diff < 0.1:
+            print(f"FINDING: Rate differences are small but detectable (<0.1 percentage points on average)")
+            print(f"IMPLICATION: Minor pricing variations may reflect operational rather than discriminatory factors")
+        else:
+            print(f"FINDING: Rate differences are economically significant (≥0.1 percentage points on average)")
+            print(f"IMPLICATION: Systematic pricing disparities warrant further investigation")
         
         # Visualizations
         # 1. Rate differences by cohort
@@ -942,11 +1140,18 @@ if len(matched_loans) > 0:
             print(f"- No significant difference (p ≥ 0.05)")
             
         if diff_mean > 0:
-            print(f"- Low Income Designated CUs charge higher rates on average")
+            print(f"- Low Income Designated CUs show slightly higher average rates")
+        elif diff_mean < 0:
+            print(f"- Low Income Designated CUs show slightly lower average rates") 
         else:
-            print(f"- Low Income Designated CUs charge lower rates on average")
+            print(f"- Average rates are essentially identical between CU types")
             
-        print(f"- The practical significance is {effect_size.lower()} based on Cohen's d")
+        if abs(diff_mean) < 0.05:
+            print(f"- Rate difference is minimal and likely not economically significant")
+        elif abs(diff_mean) < 0.1:
+            print(f"- Rate difference is small but detectable")
+        else:
+            print(f"- Rate difference is potentially economically significant")
 
         print(f"\nOverall Rate Summary for Matched Loans:")
         print(f"Low Income Designated CUs - Mean: {low_income_rates.mean():.3f}%, Median: {low_income_rates.median():.3f}%")
@@ -1061,8 +1266,8 @@ if len(matched_loans) > 0:
         
         print(f"\nKey Findings:")
         print(f"- Average rate spread across loan sizes: {spreads_df['rate_spread'].mean():.3f} percentage points")
-        print(f"- Loan ranges where Low Income CUs charge more: {(spreads_df['rate_spread'] > 0).sum()}")
-        print(f"- Loan ranges where Low Income CUs charge less: {(spreads_df['rate_spread'] < 0).sum()}")
+        print(f"- Loan ranges where Low Income CUs have higher rates: {(spreads_df['rate_spread'] > 0).sum()}")
+        print(f"- Loan ranges where Low Income CUs have lower rates: {(spreads_df['rate_spread'] < 0).sum()}")
         print(f"- Largest rate difference: {spreads_df['rate_spread'].abs().max():.3f} percentage points")
 
     # Also need to create a mapping for visualization labels
@@ -1074,12 +1279,35 @@ if len(matched_loans) > 0:
     
     # Update the box plot to use labeled data
     plt.figure(figsize=(12, 6))
-    sns.boxplot(x='cu_type_label', y='interest_rate', data=loans_df_viz, palette=['steelblue', 'coral'])
+    ax = sns.boxplot(x='cu_type_label', y='interest_rate', data=loans_df_viz, palette=['steelblue', 'coral'])
     plt.title('Interest Rate Distribution for Similar Loan Profiles', fontsize=14, fontweight='bold')
     plt.xlabel('Credit Union Type', fontsize=12)
     plt.ylabel('Interest Rate (%)', fontsize=12)
     plt.ylim(2, 8)
     plt.grid(True, alpha=0.3)
+    
+    # Add quartile labels for each credit union type
+    for i, cu_type in enumerate(['Non-Low Income Designated', 'Low Income Designated']):
+        cu_data = loans_df_viz[loans_df_viz['cu_type_label'] == cu_type]['interest_rate']
+        
+        if len(cu_data) > 0:
+            q1 = cu_data.quantile(0.25)
+            median = cu_data.median()
+            q3 = cu_data.quantile(0.75)
+            
+            # Add quartile text labels
+            ax.text(i, q3 + 0.1, f'Q3: {q3:.3f}%', ha='center', va='bottom', 
+                   fontsize=10, fontweight='bold', color='darkblue')
+            ax.text(i, median, f'Median: {median:.3f}%', ha='center', va='center', 
+                   fontsize=10, fontweight='bold', color='white', 
+                   bbox=dict(boxstyle='round,pad=0.3', facecolor='red', alpha=0.9))
+            ax.text(i, q1 - 0.1, f'Q1: {q1:.3f}%', ha='center', va='top', 
+                   fontsize=10, fontweight='bold', color='darkblue')
+            
+            # Add sample size
+            ax.text(i, 1.8, f'n = {len(cu_data):,}', ha='center', va='bottom', 
+                   fontsize=9, style='italic', color='gray')
+    
     plt.tight_layout()
     plt.show()
 
@@ -1121,6 +1349,14 @@ from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, roc_curve
 import warnings
 warnings.filterwarnings('ignore')
+
+# Initialize database connection if not already done
+try:
+    # Test if con_filtered exists and is working
+    con_filtered.execute("SELECT 1").fetchone()
+except (NameError, AttributeError):
+    # Create new connection if it doesn't exist
+    con_filtered = duckdb.connect()
 
 # Get comprehensive dataset including denied loans for prediction modeling
 modeling_query = """
