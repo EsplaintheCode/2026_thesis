@@ -92,11 +92,8 @@ exclude_cols = [
     'co_applicant_race_2', 'co_applicant_race_3', 'co_applicant_race_4', 'co_applicant_race_5',
     'denial_reason_2', 'denial_reason_3', 'denial_reason_4',
     'total_points_and_fees', 'discount_points', 'lender_credits', 'prepayment_penalty_term',
-    'intro_rate_period', 'aus_2', 'aus_3', 'aus_4', 'aus_5', 'multifamily_affordable_units'
-]
+    'intro_rate_period', 'aus_2', 'aus_3', 'aus_4', 'aus_5', 'multifamily_affordable_units']
 
-print(f"Columns to exclude: {len(exclude_cols)}")
-print(f"Exclude list: {exclude_cols}")
 
 # Drop columns with >80% null values
 if exclude_cols:
@@ -128,20 +125,13 @@ con.execute(sql_query)
 # Print summary of what was processed
 total_records = con.execute("SELECT COUNT(*) FROM 'hmda_filtered_2022_2024.parquet'").fetchone()[0]
 columns_after = con.execute("DESCRIBE SELECT * FROM 'hmda_filtered_2022_2024.parquet' LIMIT 0").fetchall()
-print(f"- Total records: {total_records:,}")
-print(f"- Final columns: {len(columns_after)}")
-print(f"- Columns excluded: {len(exclude_cols)}")
+print(f"Total records: {total_records:,}")
+print(f"Final columns: {len(columns_after)}")
+print(f"Columns excluded: {len(exclude_cols)}")
 
-```
+
 ### Filter the data
-
-
-```{python}
-#| echo: false
-#| message: false
-#| warning: false
-
-# Filter the data: conventional, owner-occupied, first-lien loans for 1-4 family properties for home purchases, action taken 1 loan originated, 2 approved not accepted, 3 denied, excludes reverse mortgage, not an open end line of credit, and not a manufactured home loan
+# conventional, owner-occupied, first-lien loans for 1-4 family properties for home purchases, action taken 1 loan originated, 2 approved not accepted, 3 denied, excludes reverse mortgage, not an open end line of credit, and not a manufactured home loan
 
 con.execute("""
 COPY (
@@ -163,7 +153,7 @@ COPY (
 
 ```
 
-### Data clean up: columns name, data types, null counts from FILTER data
+### Data clean up
 
 ```{python}
 #| echo: false
@@ -189,7 +179,7 @@ print(f"{'#':<3} {'Column Name':<35} {'Data Type':<12} {'Null Count':<12} {'Null
 
 # Analyze each column for null counts
 for i, column_info in enumerate(columns_info, 1):
-    col_name, col_type = column_info[0], column_info[1]  # Get first two values safely
+    col_name, col_type = column_info[0], column_info[1]
     
     # Count nulls and common HMDA missing value indicators
     null_query = f"""
@@ -216,10 +206,10 @@ for i, column_info in enumerate(columns_info, 1):
 
 print(f"\nTotal columns: {len(columns_info)}")
 
+
 ```
 
 ### Feature Engineering and Analysis
-
 
 ### Feature Engineering
 
@@ -230,8 +220,16 @@ print(f"\nTotal columns: {len(columns_info)}")
 
 import matplotlib.pyplot as plt
 import seaborn as sns
+import duckdb
 
-# Summarize columns by low income designation, denial rates (not count), pricing outcomes for each year and between low income designation
+# Initialize database connection
+try:
+    # Test if con_filtered exists and is working
+    con_filtered.execute("SELECT 1").fetchone()
+except (NameError, AttributeError):
+    # Create new connection if it doesn't exist
+    con_filtered = duckdb.connect()
+
 summary_query = """
 SELECT
     low_income_designation,
@@ -239,9 +237,38 @@ SELECT
     COUNT(*) AS total_applications,
     SUM(CASE WHEN action_taken = 3 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) AS denial_rate,
     AVG(CASE WHEN action_taken IN (1, 2) THEN 1 ELSE 0 END) * 100.0 AS approval_rate,
-    AVG(CASE WHEN action_taken IN (1, 2) THEN CAST(loan_amount AS FLOAT) END) AS avg_loan_amount
+    AVG(CASE WHEN action_taken IN (1, 2) 
+             AND loan_amount IS NOT NULL 
+             AND TRY_CAST(loan_amount AS FLOAT) IS NOT NULL
+             THEN CAST(loan_amount AS FLOAT) 
+             ELSE NULL END) AS avg_loan_amount,
+    AVG(CASE WHEN action_taken IN (1, 2) 
+             AND interest_rate IS NOT NULL 
+             AND CAST(interest_rate AS VARCHAR) != 'NA'
+             AND TRY_CAST(interest_rate AS FLOAT) IS NOT NULL
+             THEN CAST(interest_rate AS FLOAT) 
+             ELSE NULL END) AS avg_interest_rate,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY 
+        CASE WHEN action_taken IN (1, 2) 
+             AND interest_rate IS NOT NULL 
+             AND CAST(interest_rate AS VARCHAR) != 'NA'
+             AND TRY_CAST(interest_rate AS FLOAT) IS NOT NULL
+             THEN CAST(interest_rate AS FLOAT) 
+             ELSE NULL END) AS median_interest_rate,
+    AVG(CASE WHEN action_taken IN (1, 2) 
+             AND rate_spread IS NOT NULL 
+             AND CAST(rate_spread AS VARCHAR) != 'NA'
+             AND TRY_CAST(rate_spread AS FLOAT) IS NOT NULL
+             THEN CAST(rate_spread AS FLOAT) 
+             ELSE NULL END) AS avg_rate_spread,
+    PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY 
+        CASE WHEN action_taken IN (1, 2) 
+             AND rate_spread IS NOT NULL 
+             AND CAST(rate_spread AS VARCHAR) != 'NA'
+             AND TRY_CAST(rate_spread AS FLOAT) IS NOT NULL
+             THEN CAST(rate_spread AS FLOAT) 
+             ELSE NULL END) AS median_rate_spread
 FROM 'hmda_filtered_2022_2024_filtered.parquet'
-
 GROUP BY low_income_designation, activity_year
 ORDER BY low_income_designation, activity_year
 """
@@ -249,1608 +276,1179 @@ ORDER BY low_income_designation, activity_year
 # Execute the query to create summary_df
 summary_df = con_filtered.execute(summary_query).fetchdf()
 
-# Display summary statistics
-print("Summary Statistics by Low Income Designation and Year:")
-print(summary_df)
+# Labeling for summary
+summary_df['CU_Type'] = summary_df['low_income_designation'].map({
+    '0': 'Non-Low Income Designated', 
+    '1': 'Low Income Designated'
+})
 
-```
+# Set up the comprehensive dashboard with 3x2 layout
+plt.style.use('default')
+fig, axes = plt.subplots(3, 2, figsize=(16, 18))
+fig.suptitle('Credit Union Key Metrics by Type and Year\n', 
+             fontsize=18, fontweight='bold', y=0.98)
 
-### Denial Rates & Loan Amount Distributions by Low Income Designation and Year
+# Color palette
+colors = ['#001581', '#adadad'] 
+sns.set_palette(colors)
 
-Findings
---- Graph 1: Approval rates are consistently high (80%+) across both credit union types, but Low Income Designated Credit Unions show slightly lower approval rates in most years
---- Graph 2: Loan amount distributions reveal significant differences: Non-Low Income Designated CUs approve larger loan amounts on average, with distributions skewed toward higher values (this is expected)
---- Graph 3: The box plot analysis shows Non-Low Income CUs have higher median loan amounts and greater variability in approved loan sizes
---- Implications: This suggests potential access barriers for borrowers seeking larger loans at Low Income Designated institutions, possibly due to capital constraints or more conservative lending practices.
+# ax1 = Application Volume
+ax1 = axes[0, 0]
+summary_pivot = summary_df.pivot(index='activity_year', columns='CU_Type', values='total_applications')
+summary_pivot.plot(kind='bar', ax=ax1, color=colors, alpha=0.8, width=0.7)
+ax1.set_title('Application Volume by Year', fontsize=14, fontweight='bold', pad=15)
+ax1.set_xlabel('Year', fontsize=12)
+ax1.set_ylabel('Total Applications', fontsize=12)  
+ax1.legend(title='Credit Union Type', fontsize=10, title_fontsize=11)
+ax1.grid(True, alpha=0.3, axis='y')
+ax1.tick_params(axis='x', rotation=0)
 
+# Add value labels on bars
+for container in ax1.containers:
+    ax1.bar_label(container, fmt='%d', fontsize=9)
 
-```{python}
-#| echo: false
-#| message: false
-#| warning: false
+# ax2 = Average Loan Amount by Year
+ax2 = axes[0, 1]
+amount_pivot = summary_df.pivot(index='activity_year', columns='CU_Type', values='avg_loan_amount')
+amount_pivot.plot(kind='bar', ax=ax2, color=colors, alpha=0.8, width=0.7)
+ax2.set_title('Average Loan Amount by Year', fontsize=14, fontweight='bold', pad=15)
+ax2.set_xlabel('Year', fontsize=12)
+ax2.set_ylabel('Average Loan Amount ($)', fontsize=12)
+ax2.legend(title='Credit Union Type', fontsize=10, title_fontsize=11)
+ax2.grid(True, alpha=0.3, axis='y')
+ax2.tick_params(axis='x', rotation=0)
+ax2.set_ylim(200000, 500000)
 
-### Denial Rates
+# Format y-axis as currency
+ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x/1000:.0f}K'))
 
-# Plot denial rates by low income designation and year
+# Add value labels on bars
+for container in ax2.containers:
+    ax2.bar_label(container, labels=[f'${v/1000:.0f}K' for v in container.datavalues], fontsize=9)
 
-sns.set(style="whitegrid")
-plt.figure(figsize=(10,5))
-sns.barplot(x="activity_year", y="denial_rate", hue="low_income_designation", data=summary_df)
-plt.title("Denial Rates by Low Income Designation and Year")
-plt.ylabel("Denial Rate (%)")
-plt.xlabel("Year")
-plt.legend(title="Low Income Designation")
-plt.show()
+# ax3 = Denial Rate
+ax3 = axes[0, 2]  
+denial_pivot = summary_df.pivot(index='activity_year', columns='CU_Type', values='denial_rate')
+denial_pivot.plot(kind='bar', ax=ax3, color=colors, alpha=0.8, width=0.7)
+ax3.set_title('Denial Rate by Year', fontsize=14, fontweight='bold', pad=15)
+ax3.set_xlabel('Year', fontsize=12)
+ax3.set_ylabel('Denial Rate (%)', fontsize=12)
+ax3.legend(title='Credit Union Type', fontsize=10, title_fontsize=11)
+ax3.grid(True, alpha=0.3, axis='y')
+ax3.tick_params(axis='x', rotation=0)
+ax3.set_ylim(3, 20)
 
+# Add value labels on bars
+for container in ax3.containers:
+    ax3.bar_label(container, fmt='%.1f%%', fontsize=9)
 
-# Distribution of Loan Amounts by Low Income Designation and Year using box plots and histograms
+# ax4 = Average Interest Rate by Year 
+ax4 = axes[1, 0]
+rate_pivot = summary_df.pivot(index='activity_year', columns='CU_Type', values='avg_interest_rate') 
+rate_pivot.plot(kind='bar', ax=ax4, color=colors, alpha=0.8, width=0.7)
+ax4.set_title('Average Interest Rate by Year', fontsize=14, fontweight='bold', pad=15)
+ax4.set_xlabel('Year', fontsize=12) 
+ax4.set_ylabel('Average Interest Rate (%)', fontsize=12)
+ax4.legend(title='Credit Union Type', fontsize=10, title_fontsize=11)
+ax4.grid(True, alpha=0.3, axis='y')
+ax4.tick_params(axis='x', rotation=0)
+ax4.set_ylim(0, 9)
 
-# Get individual loan amounts for approved loans
-loan_distribution_query = """
-SELECT
-    low_income_designation,
-    activity_year,
-    CAST(loan_amount AS FLOAT) AS loan_amount
-FROM 'hmda_filtered_2022_2024_filtered.parquet'
-WHERE action_taken IN (1, 2) -- Only approved/originated loans
-  AND loan_amount IS NOT NULL
-  AND CAST(loan_amount AS FLOAT) > 0
-ORDER BY low_income_designation, activity_year
-"""
+# Add value labels on bars
+for container in ax4.containers:
+    ax4.bar_label(container, fmt='%.2f%%', fontsize=9)
 
-# Execute the query to create loan_df
-loan_df = con_filtered.execute(loan_distribution_query).fetchdf()
+# ax5 = Median Interest Rate by Year
+ax5 = axes[1, 1]
+median_rate_pivot = summary_df.pivot(index='activity_year', columns='CU_Type', values='median_interest_rate')
+median_rate_pivot.plot(kind='bar', ax=ax5, color=colors, alpha=0.8, width=0.7)
+ax5.set_title('Median Interest Rate by Year', fontsize=14, fontweight='bold', pad=15)
+ax5.set_xlabel('Year', fontsize=12)
+ax5.set_ylabel('Median Interest Rate (%)', fontsize=12)
+ax5.legend(title='Credit Union Type', fontsize=10, title_fontsize=11)
+ax5.grid(True, alpha=0.3, axis='y')
+ax5.tick_params(axis='x', rotation=0)
+ax5.set_ylim(0, 9)
 
-# Define consistent bin edges for loan amounts (same bins for all comparisons)
-loan_amount_bins = list(range(0, 2000001, 50000))  # $0 to $2M in $50K increments (40 bins)
+# Add value labels on bars
+for container in ax5.containers:
+    ax5.bar_label(container, fmt='%.2f%%', fontsize=9)
 
-# Histogram plot showing loan amount distributions by low income designation and year for approved loans
+# ax6 = Average Rate Spread by Year
+ax6 = axes[2, 0]
+spread_pivot = summary_df.pivot(index='activity_year', columns='CU_Type', values='avg_rate_spread')
+spread_pivot.plot(kind='bar', ax=ax6, color=colors, alpha=0.8, width=0.7)
+ax6.set_title('Average Rate Spread by Year\n(APR - APOR)', fontsize=14, fontweight='bold', pad=15)
+ax6.set_xlabel('Year', fontsize=12)
+ax6.set_ylabel('Average Rate Spread (%)', fontsize=12)
+ax6.legend(title='Credit Union Type', fontsize=10, title_fontsize=11)
+ax6.grid(True, alpha=0.3, axis='y')
+ax6.tick_params(axis='x', rotation=0)
 
-plt.figure(figsize=(12,8))
-years = sorted(loan_df['activity_year'].unique())
-for i, year in enumerate(years):
-    plt.subplot(2, 2, i+1)
-    year_data = loan_df[loan_df['activity_year'] == year]
-    
-    for designation in sorted(year_data['low_income_designation'].unique()):
-        designation_data = year_data[year_data['low_income_designation'] == designation]
-        plt.hist(designation_data['loan_amount'], bins=loan_amount_bins, alpha=0.7, 
-                label=f'{designation}', density=True, edgecolor='black', linewidth=0.5)
-    
-    plt.title(f'Approved Loan Amount Distribution - {year}')
-    plt.xlabel('Approved Loan Amount ($)')
-    plt.ylabel('Density')
-    plt.legend(title='Low Income Designation')
-    plt.ticklabel_format(style='plain', axis='x')
-    plt.xlim(0, 2000000)
-    plt.grid(True, alpha=0.3)
+# Add value labels on bars  
+for container in ax6.containers:
+    ax6.bar_label(container, fmt='%.3f%%', fontsize=9)
+
+# ax7 = Median Rate Spread by Year
+ax7 = axes[2, 1]
+median_spread_pivot = summary_df.pivot(index='activity_year', columns='CU_Type', values='median_rate_spread')
+median_spread_pivot.plot(kind='bar', ax=ax7, color=colors, alpha=0.8, width=0.7)
+ax7.set_title('Median Rate Spread by Year\n(APR - APOR)', fontsize=14, fontweight='bold', pad=15)
+ax7.set_xlabel('Year', fontsize=12)
+ax7.set_ylabel('Median Rate Spread (%)', fontsize=12)
+ax7.legend(title='Credit Union Type', fontsize=10, title_fontsize=11)
+ax7.grid(True, alpha=0.3, axis='y')
+ax7.tick_params(axis='x', rotation=0)
+
+# Add value labels on bars  
+for container in ax7.containers:
+    ax7.bar_label(container, fmt='%.3f%%', fontsize=9)
 
 plt.tight_layout()
-plt.show()
-
-
-# Box plot showing loan amount distribution by low income designation and year
-plt.figure(figsize=(15,9))
-sns.boxplot(x="activity_year", y="loan_amount", hue="low_income_designation", data=loan_df)
-plt.title("Distribution of Loan Amounts by Low Income Designation and Year")
-plt.ylabel("Loan Amount ($)")
-plt.xlabel("Year")
-plt.legend(title="Low Income Designation")
-plt.ticklabel_format(style='plain', axis='y')
-plt.ylim(0, 1500000)
-plt.xticks(rotation=0)
-plt.show()
-
-# Histogram showing loan amount distributions
-plt.figure(figsize=(15,9))
-for i, year in enumerate(sorted(loan_df['activity_year'].unique())):
-    plt.subplot(2, 2, i+1)
-    year_data = loan_df[loan_df['activity_year'] == year]
-    for designation in year_data['low_income_designation'].unique():
-        designation_data = year_data[year_data['low_income_designation'] == designation]
-        plt.hist(designation_data['loan_amount'], bins=loan_amount_bins, alpha=0.6, 
-                label=designation, density=True)
-    plt.title(f'Approved Loan Amount Distribution - {year}')
-    plt.xlabel('Loan Amount ($)')
-    plt.ylabel('Density')
-    plt.legend()
-    plt.ticklabel_format(style='plain', axis='x')
-    plt.xlim(0, 2000000)
-
-plt.tight_layout()
+plt.subplots_adjust(top=0.95, hspace=0.4, wspace=0.3)
 plt.show()
 
 
 ```
 
 ### Interest Rate Spread Distributions by Low Income Designation and Year
-
-Key Findings
-- **Interest rate medians are equivalent** between Low Income Designated and Non-Low Income Designated CUs across all years (2022-2024)
-- **Box plot analysis reveals similar distribution patterns** with overlapping quartile ranges indicating comparable pricing practices
-- **No evidence of systematic rate premiums** at Low Income Designated institutions contrary to initial fairness drift hypothesis
-- **Rate similarity persists across years**, suggesting consistent competitive pricing between institution types
-
-**Implications for Community Development Assessment:**
-- **No pricing disadvantage identified**: Low Income Designated CUs do not impose higher borrowing costs on their communities
-
-
-
 ```{python}
 #| echo: false
 #| message: false
 #| warning: false
 
-# Initialize database connection if not already done
-import duckdb
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+import numpy as np
 
-pricing_query = """
+# Get comprehensive rate spread data for analysis
+rate_spread_query = """
 SELECT
-    low_income_designation,
     activity_year,
-    CAST(interest_rate AS FLOAT) AS interest_rate
+    low_income_designation,
+    action_taken,
+    TRY_CAST(rate_spread AS FLOAT) AS rate_spread_value,
+    TRY_CAST(interest_rate AS FLOAT) AS interest_rate,
+    TRY_CAST(loan_amount AS FLOAT) AS loan_amount
 FROM 'hmda_filtered_2022_2024_filtered.parquet'
 WHERE action_taken IN (1, 2) -- Only approved/originated loans
-  AND interest_rate IS NOT NULL
-  AND TRY_CAST(interest_rate AS FLOAT) IS NOT NULL
-  AND TRY_CAST(interest_rate AS FLOAT) > 0
-ORDER BY low_income_designation, activity_year
-"""
-pricing_df = con_filtered.execute(pricing_query).fetchdf()
-
-# Diagnostic: Check what's actually in the data
-print("=== DIAGNOSTIC: Interest Rate Data Check ===")
-print(f"Total records: {len(pricing_df):,}")
-print(f"Unique values in low_income_designation: {sorted(pricing_df['low_income_designation'].unique())}")
-print(f"\nBreakdown by designation:")
-for designation in sorted(pricing_df['low_income_designation'].unique()):
-    subset = pricing_df[pricing_df['low_income_designation'] == designation]
-    print(f"  {designation}: {len(subset):,} records")
-    print(f"    Interest rate range: {subset['interest_rate'].min():.4f}% to {subset['interest_rate'].max():.4f}%")
-    print(f"    Median: {subset['interest_rate'].median():.8f}%")
-    print(f"    Mean: {subset['interest_rate'].mean():.8f}%")
-
-print(f"\nBreakdown by designation and year:")
-for year in sorted(pricing_df['activity_year'].unique()):
-    print(f"\n--- {year} ---")
-    year_data = pricing_df[pricing_df['activity_year'] == year]
-    for designation in sorted(year_data['low_income_designation'].unique()):
-        subset = year_data[year_data['low_income_designation'] == designation]
-        if len(subset) > 0:
-            print(f"  {designation}: n={len(subset):,}, median={subset['interest_rate'].median():.8f}%")
-
-# Sample data check
-print(f"\nSample of data:")
-print(pricing_df.groupby('low_income_designation')['interest_rate'].head(3))
-
-# Visualize pricing distributions by low income designation and year using box plots
-plt.figure(figsize=(15,9))
-ax = sns.boxplot(x="activity_year", y="interest_rate", hue="low_income_designation", data=pricing_df)
-plt.title("Distribution of Interest Rates by Low Income Designation and Year - Approved/Originated Loans")
-plt.ylabel("Interest Rate (%)")
-plt.xlabel("Year")
-plt.legend(title="Low Income Designation")
-plt.ylim(0, 15)
-plt.xticks(rotation=0)
-
-# Add quartile labels
-for i, year in enumerate(sorted(pricing_df['activity_year'].unique())):
-    for j, designation in enumerate(sorted(pricing_df['low_income_designation'].unique())):
-        year_designation_data = pricing_df[
-            (pricing_df['activity_year'] == year) & 
-            (pricing_df['low_income_designation'] == designation)
-        ]['interest_rate']
-        
-        if len(year_designation_data) > 0:
-            q1 = year_designation_data.quantile(0.25)
-            median = year_designation_data.median()
-            q3 = year_designation_data.quantile(0.75)
-            
-            # Position labels (offset for multiple designations)
-            x_pos = i + (j - 0.5) * 0.4
-            
-            # Add quartile text labels
-            ax.text(x_pos, q3 + 0.1, f'Q3: {q3:.6f}%', ha='center', va='bottom', 
-                   fontsize=8, fontweight='bold', color='darkblue')
-            ax.text(x_pos, median + 0.05, f'Med: {median:.6f}%', ha='center', va='bottom', 
-                   fontsize=8, fontweight='bold', color='darkblue')
-            ax.text(x_pos, q1 - 0.1, f'Q1: {q1:.6f}%', ha='center', va='top', 
-                   fontsize=8, fontweight='bold', color='darkblue')
-
-plt.show()  
-
-
-```
-
-### Applicant Income Distribution
-
-```{python}
-#| echo: false
-#| message: false
-#| warning: false
-
-# Get all applicant income data from filtered dataset
-income_query = """
-SELECT
-    low_income_designation,
-    activity_year,
-    action_taken,
-    CASE 
-        WHEN TRY_CAST(income AS FLOAT) IS NOT NULL AND TRY_CAST(income AS FLOAT) > 0 
-        THEN CAST(income AS FLOAT) 
-        ELSE NULL 
-    END AS applicant_income
-FROM 'hmda_filtered_2022_2024_filtered.parquet'
-WHERE income IS NOT NULL
+  AND rate_spread IS NOT NULL 
+  AND CAST(rate_spread AS VARCHAR) != 'NA'
+  AND TRY_CAST(rate_spread AS FLOAT) IS NOT NULL
 """
 
-income_df = con_filtered.execute(income_query).fetchdf()
-income_df = income_df.dropna(subset=['applicant_income'])
+# Execute query and clean data
+yearly_spreads_df = con_filtered.execute(rate_spread_query).fetchdf()
+yearly_spreads_df = yearly_spreads_df.dropna(subset=['rate_spread_value'])
 
-# Separate approved loans (action_taken 1 or 2) for overlay
-approved_income_df = income_df[income_df['action_taken'].isin([1, 2])]
+# Add readable labels
+yearly_spreads_df['cu_type'] = yearly_spreads_df['low_income_designation'].map({
+    '0': 'Non-Low Income Designated',
+    '1': 'Low Income Designated'
+})
 
-print(f"\nApplicant Income Data:")
-print(f"Total records with valid income: {len(income_df):,}")
-print(f"Approved loan records with valid income: {len(approved_income_df):,}")
-print(f"\nAll Applications - Income Summary by Low Income Designation:")
-print(income_df.groupby('low_income_designation')['applicant_income'].describe())
-print(f"\nApproved Loans - Income Summary by Low Income Designation:")
-print(approved_income_df.groupby('low_income_designation')['applicant_income'].describe())
+# Generate summary statistics using pandas groupby
+summary_stats = yearly_spreads_df.groupby(['activity_year', 'cu_type'])['rate_spread_value'].agg([
+    'count', 'mean', 'median', 'std', 
+    lambda x: x.quantile(0.25), 
+    lambda x: x.quantile(0.75)
+]).round(4).reset_index()
 
-# Side-by-side histograms for income distribution with approved loan overlay
-fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+summary_stats.columns = ['activity_year', 'cu_type', 'count', 'mean', 'median', 'std', 'q25', 'q75']
 
-# Create income bins
-income_bins = range(0, 401, 20)  # $0 to $400K in $20K increments
+# Print data summary
+print(f"\nRate Spread Data Summary:")
+print(f"Total approved loans with valid rate spread data: {len(yearly_spreads_df):,}")
+print(f"Rate spread range: {yearly_spreads_df['rate_spread_value'].min():.3f} to {yearly_spreads_df['rate_spread_value'].max():.3f}")
+print(summary_stats.to_string(index=False))
 
-designations = sorted(income_df['low_income_designation'].unique())
-colors = ['steelblue', 'coral']
-approved_colors = ['darkblue', 'darkred']
-titles = ['Non-Low Income Designated Credit Unions', 'Low Income Designated Credit Unions']
+# Create visualization
+fig, axes = plt.subplots(2, 3, figsize=(18, 12))
+fig.suptitle('Rate Spread Distribution Analysis by Credit Union Type \n \n \n', 
+             fontsize=16, fontweight='bold', y=0.95)
 
-for idx, designation in enumerate(designations):
-    # All applicants data
-    designation_data = income_df[income_df['low_income_designation'] == designation]
-    # Approved loans data
-    approved_designation_data = approved_income_df[approved_income_df['low_income_designation'] == designation]
-    
-    # Plot all applicants (base histogram)
-    axes[idx].hist(designation_data['applicant_income'], bins=income_bins, 
-                   color=colors[idx], alpha=0.6, edgecolor='black', linewidth=0.5,
-                   label='All Applications')
-    
-    # Overlay approved loans (transparent)
-    axes[idx].hist(approved_designation_data['applicant_income'], bins=income_bins, 
-                   color=approved_colors[idx], alpha=0.4, edgecolor='black', linewidth=0.3,
-                   label='Approved Loans')
-    
-    # Add statistics for calculations
-    median_val = designation_data['applicant_income'].median()
-    mean_val = designation_data['applicant_income'].mean()
-    count_val = len(designation_data)
-    
-    approved_median = approved_designation_data['applicant_income'].median()
-    approved_mean = approved_designation_data['applicant_income'].mean()
-    approved_count = len(approved_designation_data)
-    
-    # Add median lines
-    axes[idx].axvline(median_val, color='red', linestyle='--', linewidth=2, alpha=0.8, label='All Apps Median')
-    axes[idx].axvline(approved_median, color='purple', linestyle=':', linewidth=2, alpha=0.8, label='Approved Median')
-    
-    axes[idx].set_title(titles[idx], fontsize=13, fontweight='bold')
-    axes[idx].set_xlabel('Applicant Income ($1000s)', fontsize=11)
-    axes[idx].set_ylabel('Number of Applicants', fontsize=11)
-    axes[idx].set_xlim(0, 400)
-    axes[idx].grid(True, alpha=0.3)
-    axes[idx].legend(loc='lower right')
-    
-    # Statistics box
-    stats_text = f'All Apps:\n  Count: {count_val:,}\n  Median: ${median_val:.0f}K\n  Mean: ${mean_val:.0f}K\n\nApproved:\n  Count: {approved_count:,}\n  Median: ${approved_median:.0f}K\n  Mean: ${approved_mean:.0f}K'
-    axes[idx].text(0.65, 0.98, stats_text, transform=axes[idx].transAxes, 
-                   verticalalignment='top', fontsize=9,
-                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
+colors = ['#001581', '#adadad']
 
-plt.suptitle('Applicant Income Distribution by Credit Union Type\n(All Applications vs Approved Loans)', fontsize=16, fontweight='bold')
-plt.tight_layout()
-plt.show()
+# Box plot
+ax1 = axes[0, 0]
+sns.boxplot(x='activity_year', y='rate_spread_value', hue='cu_type', 
+            data=yearly_spreads_df, ax=ax1, palette=colors)
+ax1.set_title('Rate Spread Distribution by Year', fontsize=12, fontweight='bold')
+ax1.set_ylim(-5, 5)
+ax1.grid(True, alpha=0.3)
+ax1.legend(loc='lower right')
 
-# Print median and mean values for both all applications and approved loans
-print("\nAll Applications - Income Statistics by Low Income Designation:")
-for designation in sorted(income_df['low_income_designation'].unique()):
-    designation_data = income_df[income_df['low_income_designation'] == designation]
-    print(f"\n  {designation}:")
-    print(f"    Count: {len(designation_data):,}")
-    print(f"    Mean: ${designation_data['applicant_income'].mean():,.2f}K")
-    print(f"    Median: ${designation_data['applicant_income'].median():,.2f}K")
-    print(f"    25th percentile: ${designation_data['applicant_income'].quantile(0.25):,.2f}K")
-    print(f"    75th percentile: ${designation_data['applicant_income'].quantile(0.75):,.2f}K")
-
-print("\nApproved Loans - Income Statistics by Low Income Designation:")
-for designation in sorted(approved_income_df['low_income_designation'].unique()):
-    approved_designation_data = approved_income_df[approved_income_df['low_income_designation'] == designation]
-    print(f"\n  {designation}:")
-    print(f"    Count: {len(approved_designation_data):,}")
-    print(f"    Mean: ${approved_designation_data['applicant_income'].mean():,.2f}K")
-    print(f"    Median: ${approved_designation_data['applicant_income'].median():,.2f}K")
-    print(f"    25th percentile: ${approved_designation_data['applicant_income'].quantile(0.25):,.2f}K")
-    print(f"    75th percentile: ${approved_designation_data['applicant_income'].quantile(0.75):,.2f}K")
-
-# Create yearly breakdown graphs
-years = sorted(income_df['activity_year'].unique())
-for year in years:
-    # Filter data for specific year
-    year_income_df = income_df[income_df['activity_year'] == year]
-    year_approved_df = approved_income_df[approved_income_df['activity_year'] == year]
-    
-    print(f"\n=== {year} Income Distribution ===")
-    print(f"Total applications with valid income: {len(year_income_df):,}")
-    print(f"Approved loans with valid income: {len(year_approved_df):,}")
-    
-    # Create side-by-side histograms for the year
-    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
-    
-    designations = sorted(year_income_df['low_income_designation'].unique())
-    colors = ['steelblue', 'coral']
-    approved_colors = ['darkblue', 'darkred']
-    titles = ['Non-Low Income Designated Credit Unions', 'Low Income Designated Credit Unions']
-    
-    for idx, designation in enumerate(designations):
-        # Year-specific data
-        designation_data = year_income_df[year_income_df['low_income_designation'] == designation]
-        approved_designation_data = year_approved_df[year_approved_df['low_income_designation'] == designation]
-        
-        if len(designation_data) == 0:
-            axes[idx].text(0.5, 0.5, 'No Data Available', transform=axes[idx].transAxes, 
-                          horizontalalignment='center', verticalalignment='center', fontsize=14)
-            axes[idx].set_title(titles[idx], fontsize=13, fontweight='bold')
-            continue
-            
-        # Plot all applicants (base histogram)
-        axes[idx].hist(designation_data['applicant_income'], bins=income_bins, 
-                       color=colors[idx], alpha=0.6, edgecolor='black', linewidth=0.5,
-                       label='All Applications')
-        
-        # Overlay approved loans (transparent)
-        if len(approved_designation_data) > 0:
-            axes[idx].hist(approved_designation_data['applicant_income'], bins=income_bins, 
-                           color=approved_colors[idx], alpha=0.4, edgecolor='black', linewidth=0.3,
-                           label='Approved Loans')
-        
-        # Add statistics for calculations
-        median_val = designation_data['applicant_income'].median()
-        mean_val = designation_data['applicant_income'].mean()
-        count_val = len(designation_data)
-        
-        approved_median = approved_designation_data['applicant_income'].median() if len(approved_designation_data) > 0 else 0
-        approved_mean = approved_designation_data['applicant_income'].mean() if len(approved_designation_data) > 0 else 0
-        approved_count = len(approved_designation_data)
-        
-        # Add median lines
-        axes[idx].axvline(median_val, color='red', linestyle='--', linewidth=2, alpha=0.8, label='All Apps Median')
-        if approved_count > 0:
-            axes[idx].axvline(approved_median, color='purple', linestyle=':', linewidth=2, alpha=0.8, label='Approved Median')
-        
-        axes[idx].set_title(titles[idx], fontsize=13, fontweight='bold')
-        axes[idx].set_xlabel('Applicant Income ($1000s)', fontsize=11)
-        axes[idx].set_ylabel('Number of Applicants', fontsize=11)
-        axes[idx].set_xlim(0, 400)
-        axes[idx].grid(True, alpha=0.3)
-        axes[idx].legend(loc='lower right')
-        
-        # Statistics box
-        if approved_count > 0:
-            stats_text = f'All Apps:\n  Count: {count_val:,}\n  Median: ${median_val:.0f}K\n  Mean: ${mean_val:.0f}K\n\nApproved:\n  Count: {approved_count:,}\n  Median: ${approved_median:.0f}K\n  Mean: ${approved_mean:.0f}K'
-        else:
-            stats_text = f'All Apps:\n  Count: {count_val:,}\n  Median: ${median_val:.0f}K\n  Mean: ${mean_val:.0f}K\n\nApproved:\n  Count: 0\n  No approved loans'
-            
-        axes[idx].text(0.65, 0.98, stats_text, transform=axes[idx].transAxes, 
-                       verticalalignment='top', fontsize=9,
-                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
-    
-    plt.suptitle(f'{year} Applicant Income Distribution by Credit Union Type\n(All Applications vs Approved Loans)', fontsize=16, fontweight='bold')
-    plt.tight_layout()
-    plt.show()
-
-```
-
-### Interest Rates by Income Buckets
-
-```{python}
-#| echo: false
-#| message: false
-#| warning: false
-
-# Import required packages
-import duckdb
-import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-# Initialize database connection if not already done
-try:
-    # Test if con_filtered exists and is working
-    con_filtered.execute("SELECT 1").fetchone()
-except (NameError, AttributeError):
-    # Create new connection if it doesn't exist
-    con_filtered = duckdb.connect()
-
-# Interest rates by income buckets
-income_rates_query = """
-SELECT
-    low_income_designation,
-    CASE 
-        WHEN TRY_CAST(income AS FLOAT) IS NOT NULL AND TRY_CAST(income AS FLOAT) > 0 
-        THEN CAST(income AS FLOAT) 
-        ELSE NULL 
-    END AS applicant_income,
-    CASE 
-        WHEN TRY_CAST(interest_rate AS FLOAT) IS NOT NULL AND TRY_CAST(interest_rate AS FLOAT) > 0 
-        THEN CAST(interest_rate AS FLOAT) 
-        ELSE NULL 
-    END AS interest_rate
-FROM 'hmda_filtered_2022_2024_filtered.parquet'
-WHERE action_taken IN (1, 2) -- Only approved loans
-  AND income IS NOT NULL
-  AND interest_rate IS NOT NULL
-"""
-
-income_rates_df = con_filtered.execute(income_rates_query).fetchdf()
-income_rates_df = income_rates_df.dropna(subset=['applicant_income', 'interest_rate'])
-
-# Create income buckets
-income_rates_df['income_bucket'] = pd.cut(
-    income_rates_df['applicant_income'], 
-    bins=[0, 50, 75, 100, 150, 200, 300, 400], 
-    labels=['<$50K', '$50K-75K', '$75K-100K', '$100K-150K', '$150K-200K', '$200K-300K', '$300K-400K']
-)
-
-# Filter out extreme interest rates for cleaner visualization
-income_rates_df = income_rates_df[income_rates_df['interest_rate'] <= 15]
-
-print(f"\nInterest Rate by Income Bucket Data:")
-print(f"Total approved loans with valid income and rate data: {len(income_rates_df):,}")
-
-# Box plot showing interest rates by income bucket and credit union type
-plt.figure(figsize=(16, 8))
-ax = sns.boxplot(x='income_bucket', y='interest_rate', hue='low_income_designation', 
-            data=income_rates_df, palette=['steelblue', 'coral'])
-plt.title('Interest Rates by Income Bucket and Credit Union Type', fontsize=14, fontweight='bold')
-plt.xlabel('Income Bucket', fontsize=12)
-plt.ylabel('Interest Rate (%)', fontsize=12)
-plt.ylim(2, 8)
-plt.legend(title='Low Income Designation', fontsize=11)
-plt.xticks(rotation=45)
-plt.grid(True, alpha=0.3)
-
-# Add quartile labels
-for i, bucket in enumerate(income_rates_df['income_bucket'].cat.categories):
-    for j, designation in enumerate(sorted(income_rates_df['low_income_designation'].unique())):
-        bucket_designation_data = income_rates_df[
-            (income_rates_df['income_bucket'] == bucket) & 
-            (income_rates_df['low_income_designation'] == designation)
-        ]['interest_rate']
-        
-        if len(bucket_designation_data) > 10:  # Only show labels for buckets with sufficient data
-            q1 = bucket_designation_data.quantile(0.25)
-            median = bucket_designation_data.median()
-            q3 = bucket_designation_data.quantile(0.75)
-            
-            # Position labels (offset for multiple designations)
-            x_pos = i + (j - 0.5) * 0.4
-            
-            # Add quartile text labels
-            ax.text(x_pos, q3 + 0.05, f'Q3: {q3:.3f}%', ha='center', va='bottom', 
-                   fontsize=8, fontweight='bold', color='darkblue')
-            ax.text(x_pos, median, f'{median:.3f}%', ha='center', va='center', 
-                   fontsize=8, fontweight='bold', color='white', 
-                   bbox=dict(boxstyle='round,pad=0.2', facecolor='red', alpha=0.8))
-            ax.text(x_pos, q1 - 0.05, f'Q1: {q1:.3f}%', ha='center', va='top', 
-                   fontsize=8, fontweight='bold', color='darkblue')
-
-plt.tight_layout()
-plt.show()
-
-# Average interest rates by income bucket
-avg_rates = income_rates_df.groupby(['income_bucket', 'low_income_designation'])['interest_rate'].agg(['count', 'mean']).round(3)
-avg_rates.columns = ['count', 'avg_rate']
-avg_rates = avg_rates.reset_index()
-avg_rates = avg_rates[avg_rates['count'] >= 10]  # Minimum sample size
-
-print("\nAverage Interest Rates of Approved Loans by Income Bucket:")
-print(avg_rates)
-
-# Bar plot of average interest rates
-plt.figure(figsize=(14, 7))
-ax = sns.barplot(x='income_bucket', y='avg_rate', hue='low_income_designation', 
-            data=avg_rates, palette=['steelblue', 'coral'])
-plt.title('Average Interest Rates by Income Bucket and Credit Union Type', fontsize=14, fontweight='bold')
-plt.xlabel('Income Bucket', fontsize=12)
-plt.ylabel('Average Interest Rate (%)', fontsize=12)
-plt.ylim(2, 8)
-plt.legend(title='Low Income Designation', fontsize=11)
-plt.xticks(rotation=45)
-plt.grid(True, alpha=0.3)
-
-# Add data labels on the bars
-for i, bucket in enumerate(avg_rates['income_bucket'].unique()):
-    bucket_data = avg_rates[avg_rates['income_bucket'] == bucket]
-    for j, (idx, row) in enumerate(bucket_data.iterrows()):
-        # Position bars (offset for multiple designations)
-        x_pos = i + (j - 0.5) * 0.4
-        rate_value = row['avg_rate']
-        
-        # Add rate value on top of bar
-        ax.text(x_pos, rate_value + 0.05, f'{rate_value:.3f}%', 
-               ha='center', va='bottom', fontsize=9, fontweight='bold', color='black')
-        
-        # Add sample size below the rate
-        ax.text(x_pos, rate_value - 0.15, f'n={row["count"]}', 
-               ha='center', va='top', fontsize=8, style='italic', color='gray')
-
-plt.tight_layout()
-plt.show()
-
-# Median interest rates by income bucket
-median_rates = income_rates_df.groupby(['income_bucket', 'low_income_designation'])['interest_rate'].agg(['count', 'median']).round(3)
-median_rates.columns = ['count', 'median_rate']
-median_rates = median_rates.reset_index()
-median_rates = median_rates[median_rates['count'] >= 10]  # Minimum sample size
-
-print("\nMedian Interest Rates of Approved Loans by Income Bucket:")
-print(median_rates)
-
-# Bar plot of median interest rates
-plt.figure(figsize=(14, 7))
-ax = sns.barplot(x='income_bucket', y='median_rate', hue='low_income_designation', 
-            data=median_rates, palette=['steelblue', 'coral'])
-plt.title('Median Interest Rates by Income Bucket and Credit Union Type', fontsize=14, fontweight='bold')
-plt.xlabel('Income Bucket', fontsize=12)
-plt.ylabel('Median Interest Rate (%)', fontsize=12)
-plt.ylim(2, 8)
-plt.legend(title='Low Income Designation', fontsize=11)
-plt.xticks(rotation=45)
-plt.grid(True, alpha=0.3)
-
-# Add data labels on the bars
-for i, bucket in enumerate(median_rates['income_bucket'].unique()):
-    bucket_data = median_rates[median_rates['income_bucket'] == bucket]
-    for j, (idx, row) in enumerate(bucket_data.iterrows()):
-        # Position bars (offset for multiple designations)
-        x_pos = i + (j - 0.5) * 0.4
-        rate_value = row['median_rate']
-        
-        # Add rate value on top of bar
-        ax.text(x_pos, rate_value + 0.05, f'{rate_value:.3f}%', 
-               ha='center', va='bottom', fontsize=9, fontweight='bold', color='black')
-        
-        # Add sample size below the rate
-        ax.text(x_pos, rate_value - 0.15, f'n={row["count"]}', 
-               ha='center', va='top', fontsize=8, style='italic', color='black')
-
-plt.tight_layout()
-plt.show()
-
-```
-
-
-## Similar Loans Analysis: Interest Rate Comparison for Matched Loan Profiles
-
-```{python}
-#| echo: false
-#| message: false
-#| warning: false
-
-# Initialize database connection if not already done
-try:
-    # Test if con_filtered exists and is working
-    con_filtered.execute("SELECT 1").fetchone()
-except (NameError, AttributeError):
-    # Create new connection if it doesn't exist
-    con_filtered = duckdb.connect()
-
-# Get comprehensive loan data for matching analysis
-similar_loans_query = """
-SELECT
-    low_income_designation,
-    CAST(loan_amount AS FLOAT) AS loan_amount,
-    CASE 
-        WHEN TRY_CAST(interest_rate AS FLOAT) IS NOT NULL AND TRY_CAST(interest_rate AS FLOAT) > 0 
-        THEN CAST(interest_rate AS FLOAT) 
-        ELSE NULL 
-    END AS interest_rate,
-    CASE 
-        WHEN TRY_CAST(income AS FLOAT) IS NOT NULL AND TRY_CAST(income AS FLOAT) > 0 
-        THEN CAST(income AS FLOAT) 
-        ELSE NULL 
-    END AS applicant_income,
-    debt_to_income_ratio,
-    CASE 
-        WHEN TRY_CAST(property_value AS FLOAT) IS NOT NULL AND TRY_CAST(property_value AS FLOAT) > 0 
-        THEN CAST(property_value AS FLOAT) 
-        ELSE NULL 
-    END AS property_value,
-    combined_loan_to_value_ratio
-FROM 'hmda_filtered_2022_2024_filtered.parquet'
-WHERE action_taken IN (1, 2) -- Only approved loans
-  AND loan_amount IS NOT NULL
-  AND interest_rate IS NOT NULL
-  AND income IS NOT NULL
-"""
-
-loans_df = con_filtered.execute(similar_loans_query).fetchdf()
-
-
-print(f"Total approved loans with complete data: {len(loans_df):,}")
-
-# Create matching cohorts based on loan characteristics
-loans_df['loan_amount_cohort'] = pd.cut(
-    loans_df['loan_amount'], 
-    bins=[0, 200000, 300000, 400000, 500000, float('inf')], 
-    labels=['<$200K', '$200K-300K', '$300K-400K', '$400K-500K', '>$500K']
-)
-
-loans_df['income_cohort'] = pd.cut(
-    loans_df['applicant_income'], 
-    bins=[0, 60000, 90000, 120000, 180000, float('inf')], 
-    labels=['<$60K', '$60K-90K', '$90K-120K', '$120K-180K', '>$180K']
-)
-
-# Convert DTI to numeric and create cohorts
-loans_df['dti_numeric'] = pd.to_numeric(
-    loans_df['debt_to_income_ratio'].replace(['NA', 'Exempt', 'Not applicable'], None), 
-    errors='coerce'
-)
-
-loans_df['dti_cohort'] = pd.cut(
-    loans_df['dti_numeric'], 
-    bins=[0, 25, 35, 45, float('inf')], 
-    labels=['<25%', '25%-35%', '35%-45%', '>45%']
-)
-
-# Create composite matching cohort (loan amount + income + DTI)
-loans_df['match_cohort'] = (
-    loans_df['loan_amount_cohort'].astype(str) + ' | ' +
-    loans_df['income_cohort'].astype(str) + ' | ' +
-    loans_df['dti_cohort'].astype(str)
-)
-
-# Find cohorts that exist in both credit union types
-cohort_counts = loans_df.dropna(subset=['match_cohort']).groupby(['match_cohort', 'low_income_designation']).size().reset_index(name='count')
-cohort_summary = cohort_counts.pivot(index='match_cohort', columns='low_income_designation', values='count').fillna(0)
-
-print(f"Available columns in cohort_summary: {list(cohort_summary.columns)}")
-print(f"Cohort summary shape: {cohort_summary.shape}")
-
-# The data uses '0' and '1' instead of 'No' and 'Yes'
-# Check which columns actually exist
-has_0 = '0' in cohort_summary.columns  # Non-low income designated
-has_1 = '1' in cohort_summary.columns  # Low income designated
-
-if has_0 and has_1:
-    matched_cohorts = cohort_summary[(cohort_summary['0'] >= 10) & (cohort_summary['1'] >= 10)].index
-    print(f"Found cohorts with both designation types")
-elif has_0:
-    print("Warning: Only '0' (non-low income designated) found in data")
-    matched_cohorts = cohort_summary[cohort_summary['0'] >= 10].index
-elif has_1:
-    print("Warning: Only '1' (low income designated) found in data")  
-    matched_cohorts = cohort_summary[cohort_summary['1'] >= 10].index
-else:
-    print("Error: No valid low_income_designation values found")
-    matched_cohorts = []
-
-print(f"\nFound {len(matched_cohorts)} cohorts with sufficient data in both credit union types")
-
-# Analyze matched cohorts
-matched_loans = loans_df[loans_df['match_cohort'].isin(matched_cohorts)].dropna(subset=['match_cohort'])
-
-print(f"\nMatching Analysis Summary:")
-print(f"- Total unique cohorts identified: {len(loans_df['match_cohort'].unique())}")
-print(f"- Cohorts with both CU types and sufficient data: {len(matched_cohorts)}")
-print(f"- Total individual loans in matched cohorts: {len(matched_loans):,}")
-if len(matched_loans) > 0:
-    print(f"- Average loans per matched cohort: {len(matched_loans) / len(matched_cohorts):.1f}")
-    print(f"- Breakdown by CU type:")
-    cu_breakdown = matched_loans['low_income_designation'].value_counts()
-    for cu_type, count in cu_breakdown.items():
-        cu_label = 'Low Income Designated' if cu_type == '1' else 'Non-Low Income Designated'
-        print(f"  {cu_label}: {count:,} loans")
-    
-    # Show data count for each individual matched cohort
-    print(f"\nDetailed Breakdown by Individual Matched Cohorts:")
-    cohort_details = matched_loans.groupby(['match_cohort', 'low_income_designation']).size().reset_index(name='loan_count')
-    cohort_summary_detailed = cohort_details.pivot(index='match_cohort', columns='low_income_designation', values='loan_count').fillna(0)
-    
-    # Add readable column names and totals
-    cohort_summary_detailed.columns = ['Non-Low Income CU', 'Low Income CU']
-    cohort_summary_detailed['Total'] = cohort_summary_detailed['Non-Low Income CU'] + cohort_summary_detailed['Low Income CU']
-    cohort_summary_detailed = cohort_summary_detailed.sort_values('Total', ascending=False)
-    
-    print(cohort_summary_detailed.astype(int))
-    
-    print(f"\nCohort Statistics:")
-    print(f"- Largest cohort: {cohort_summary_detailed['Total'].max():.0f} loans")
-    print(f"- Smallest cohort: {cohort_summary_detailed['Total'].min():.0f} loans")
-    print(f"- Median cohort size: {cohort_summary_detailed['Total'].median():.0f} loans")
-
-if len(matched_loans) > 0:
-    # Calculate rate differences by cohort
-    rate_analysis = matched_loans.groupby(['match_cohort', 'low_income_designation']).agg({
-        'interest_rate': ['count', 'mean', 'median', 'std'],
-        'loan_amount': 'mean',
-        'applicant_income': 'mean',
-        'dti_numeric': 'mean'
-    }).round(3)
-    
-    rate_analysis.columns = ['count', 'avg_rate', 'median_rate', 'std_rate', 'avg_loan', 'avg_income', 'avg_dti']
-    rate_analysis = rate_analysis.reset_index()
-    
-    # Create side-by-side comparison
-    rate_pivot = rate_analysis.pivot(index='match_cohort', columns='low_income_designation', values='avg_rate')
-    if '1' in rate_pivot.columns and '0' in rate_pivot.columns:
-        rate_pivot['Rate_Difference'] = rate_pivot['1'] - rate_pivot['0']  # Low income CU - Non-low income CU
-        rate_pivot['Abs_Difference'] = abs(rate_pivot['Rate_Difference'])
-        
-        # Add readable column names for display
-        rate_pivot = rate_pivot.rename(columns={'0': 'Non-Low_Income_CU', '1': 'Low_Income_CU'})
-        
-        print("\nInterest Rate Comparison for Similar Loan Profiles:")
-        print("(Positive difference = Low Income CUs charge higher rates, Negative = lower rates)")
-        print(rate_pivot.sort_values('Abs_Difference', ascending=False))
-        
-        # Summary statistics
-        print(f"\nSummary of Rate Differences:")
-        print(f"Average difference: {rate_pivot['Rate_Difference'].mean():.3f} percentage points")
-        print(f"Median difference: {rate_pivot['Rate_Difference'].median():.3f} percentage points")
-        print(f"Standard deviation: {rate_pivot['Rate_Difference'].std():.3f} percentage points")
-        print(f"Cohorts where Low Income CUs charge more: {(rate_pivot['Rate_Difference'] > 0).sum()}")
-        print(f"Cohorts where Low Income CUs charge less: {(rate_pivot['Rate_Difference'] < 0).sum()}")
-        
-        # Assess magnitude of differences
-        avg_diff = abs(rate_pivot['Rate_Difference'].mean())
-        median_diff = abs(rate_pivot['Rate_Difference'].median())
-        print(f"\n=== ASSESSMENT ====") 
-        if avg_diff < 0.05 and median_diff < 0.05:
-            print(f"FINDING: Rate differences are minimal (<0.05 percentage points on average)")
-            print(f"IMPLICATION: No evidence of systematic pricing discrimination between CU types")
-        elif avg_diff < 0.1 and median_diff < 0.1:
-            print(f"FINDING: Rate differences are small but detectable (<0.1 percentage points on average)")
-            print(f"IMPLICATION: Minor pricing variations may reflect operational rather than discriminatory factors")
-        else:
-            print(f"FINDING: Rate differences are economically significant (≥0.1 percentage points on average)")
-            print(f"IMPLICATION: Systematic pricing disparities warrant further investigation")
-        
-        # Visualizations
-        # 1. Rate differences by cohort
-        rate_diff_df = rate_pivot.reset_index()
-        top_differences = rate_diff_df.nlargest(10, 'Abs_Difference')
-        
-        plt.figure(figsize=(16, 8))
-        colors = ['red' if x > 0 else 'green' for x in top_differences['Rate_Difference']]
-        bars = plt.bar(range(len(top_differences)), top_differences['Rate_Difference'], color=colors, alpha=0.7)
-        plt.title('Interest Rate Differences by Loan Cohort\n(Top 10 Largest Differences)', fontsize=14, fontweight='bold')
-        plt.xlabel('Loan Cohort (Loan Amount | Income | DTI | Race)', fontsize=12)
-        plt.ylabel('Rate Difference (Low Income CU - Non-Low Income CU)', fontsize=12)
-        plt.xticks(range(len(top_differences)), top_differences['match_cohort'], rotation=45, ha='right')
-        plt.axhline(y=0, color='black', linestyle='-', alpha=0.5)
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.show()
-        
-        # 3. Statistical significance test
-        from scipy import stats
-        import numpy as np
-        
-        low_income_rates = matched_loans[matched_loans['low_income_designation'] == '1']['interest_rate']
-        non_low_income_rates = matched_loans[matched_loans['low_income_designation'] == '0']['interest_rate']
-        
-        print(f"\n" + "="*60)
-        print("COMPREHENSIVE STATISTICAL ANALYSIS")
-        print("="*60)
-        
-        # 1. Two-sample t-test (parametric)
-        t_stat, p_value_ttest = stats.ttest_ind(low_income_rates, non_low_income_rates)
-        
-        # 2. Mann-Whitney U test (non-parametric alternative)
-        u_stat, p_value_mannwhitney = stats.mannwhitneyu(low_income_rates, non_low_income_rates, alternative='two-sided')
-        
-        # 3. Effect size (Cohen's d)
-        pooled_std = np.sqrt(((len(low_income_rates) - 1) * low_income_rates.var() + 
-                             (len(non_low_income_rates) - 1) * non_low_income_rates.var()) / 
-                            (len(low_income_rates) + len(non_low_income_rates) - 2))
-        cohens_d = (low_income_rates.mean() - non_low_income_rates.mean()) / pooled_std
-        
-        # 4. Confidence interval for the difference in means
-        diff_mean = low_income_rates.mean() - non_low_income_rates.mean()
-        se_diff = np.sqrt(low_income_rates.var()/len(low_income_rates) + 
-                         non_low_income_rates.var()/len(non_low_income_rates))
-        ci_lower = diff_mean - 1.96 * se_diff
-        ci_upper = diff_mean + 1.96 * se_diff
-        
-        # 5. Levene's test for equal variances
-        levene_stat, p_value_levene = stats.levene(low_income_rates, non_low_income_rates)
-        
-        # 6. Welch's t-test (unequal variances)
-        welch_stat, p_value_welch = stats.ttest_ind(low_income_rates, non_low_income_rates, equal_var=False)
-        
-        print(f"\nSample Sizes:")
-        print(f"- Low Income Designated CUs: {len(low_income_rates):,} loans")
-        print(f"- Non-Low Income Designated CUs: {len(non_low_income_rates):,} loans")
-        
-        print(f"\nDescriptive Statistics:")
-        print(f"Low Income Designated CUs:")
-        print(f"  Mean: {low_income_rates.mean():.4f}%")
-        print(f"  Median: {low_income_rates.median():.4f}%")
-        print(f"  Std Dev: {low_income_rates.std():.4f}%")
-        
-        print(f"Non-Low Income Designated CUs:")
-        print(f"  Mean: {non_low_income_rates.mean():.4f}%")
-        print(f"  Median: {non_low_income_rates.median():.4f}%")
-        print(f"  Std Dev: {non_low_income_rates.std():.4f}%")
-        
-        print(f"\nDifference in Means: {diff_mean:+.4f} percentage points")
-        print(f"95% Confidence Interval: [{ci_lower:+.4f}, {ci_upper:+.4f}]")
-        
-        print(f"\nStatistical Tests:")
-        print(f"1. Two-Sample T-Test (equal variances assumed):")
-        print(f"   t-statistic: {t_stat:.4f}")
-        print(f"   p-value: {p_value_ttest:.6f}")
-        print(f"   Significant at α=0.05: {'Yes' if p_value_ttest < 0.05 else 'No'}")
-        print(f"   Significant at α=0.01: {'Yes' if p_value_ttest < 0.01 else 'No'}")
-        
-        print(f"\n2. Welch's T-Test (unequal variances):")
-        print(f"   t-statistic: {welch_stat:.4f}")
-        print(f"   p-value: {p_value_welch:.6f}")
-        print(f"   Significant at α=0.05: {'Yes' if p_value_welch < 0.05 else 'No'}")
-        
-        print(f"\n3. Mann-Whitney U Test (non-parametric):")
-        print(f"   U-statistic: {u_stat:.0f}")
-        print(f"   p-value: {p_value_mannwhitney:.6f}")
-        print(f"   Significant at α=0.05: {'Yes' if p_value_mannwhitney < 0.05 else 'No'}")
-        
-        print(f"\n4. Test for Equal Variances (Levene's Test):")
-        print(f"   Levene statistic: {levene_stat:.4f}")
-        print(f"   p-value: {p_value_levene:.6f}")
-        print(f"   Equal variances: {'Yes' if p_value_levene > 0.05 else 'No'}")
-        
-        print(f"\nEffect Size:")
-        print(f"Cohen's d: {cohens_d:.4f}")
-        if abs(cohens_d) < 0.2:
-            effect_size = "Small"
-        elif abs(cohens_d) < 0.5:
-            effect_size = "Small to Medium"
-        elif abs(cohens_d) < 0.8:
-            effect_size = "Medium to Large"
-        else:
-            effect_size = "Large"
-        print(f"Effect Size Interpretation: {effect_size}")
-        
-        print(f"\nOverall Conclusion:")
-        if p_value_ttest < 0.001:
-            print(f"- Highly significant difference (p < 0.001)")
-        elif p_value_ttest < 0.01:
-            print(f"- Very significant difference (p < 0.01)")
-        elif p_value_ttest < 0.05:
-            print(f"- Significant difference (p < 0.05)")
-        else:
-            print(f"- No significant difference (p ≥ 0.05)")
-            
-        if diff_mean > 0:
-            print(f"- Low Income Designated CUs show slightly higher average rates")
-        elif diff_mean < 0:
-            print(f"- Low Income Designated CUs show slightly lower average rates") 
-        else:
-            print(f"- Average rates are essentially identical between CU types")
-            
-        if abs(diff_mean) < 0.05:
-            print(f"- Rate difference is minimal and likely not economically significant")
-        elif abs(diff_mean) < 0.1:
-            print(f"- Rate difference is small but detectable")
-        else:
-            print(f"- Rate difference is potentially economically significant")
-
-        print(f"\nOverall Rate Summary for Matched Loans:")
-        print(f"Low Income Designated CUs - Mean: {low_income_rates.mean():.3f}%, Median: {low_income_rates.median():.3f}%")
-        print(f"Non-Low Income Designated CUs - Mean: {non_low_income_rates.mean():.3f}%, Median: {non_low_income_rates.median():.3f}%")
-
-    # LOAN AMOUNT vs INTEREST RATE RELATIONSHIP ANALYSIS
-    print("\n" + "="*60)
-    print("LOAN AMOUNT vs INTEREST RATE RELATIONSHIP ANALYSIS")
-    print("="*60)
-    
-    # Correlation analysis
-    correlation = matched_loans[['loan_amount', 'interest_rate']].corr()
-    print(f"\nOverall correlation between loan amount and interest rate: {correlation.iloc[0,1]:.4f}")
-    
-    # Separate correlations by credit union type
-    for cu_type in ['1', '0']:
-        cu_data = matched_loans[matched_loans['low_income_designation'] == cu_type]
-        cu_corr = cu_data[['loan_amount', 'interest_rate']].corr().iloc[0,1]
-        cu_label = 'Low Income Designated' if cu_type == '1' else 'Non-Low Income Designated'
-        print(f"{cu_label} CUs correlation: {cu_corr:.4f}")
-    
-    # Scatter plot: Loan Amount vs Interest Rate
-    plt.figure(figsize=(14, 8))
-    for cu_type, color, label in [('0', 'steelblue', 'Non-Low Income Designated'), 
-                                   ('1', 'coral', 'Low Income Designated')]:
-        cu_data = matched_loans[matched_loans['low_income_designation'] == cu_type]
-        plt.scatter(cu_data['loan_amount'], cu_data['interest_rate'], 
-                   alpha=0.6, color=color, label=label, s=20)
-    
-    plt.title('Loan Amount vs Interest Rate for Similar Loan Profiles', fontsize=14, fontweight='bold')
-    plt.xlabel('Loan Amount ($)', fontsize=12)
-    plt.ylabel('Interest Rate (%)', fontsize=12)
-    plt.legend(fontsize=11)
-    plt.grid(True, alpha=0.3)
-    plt.ticklabel_format(style='plain', axis='x')
-    plt.ylim(2, 8)
-    plt.tight_layout()
-    plt.show()
-    
-    # Binned analysis: Average rates by loan amount ranges
-    loan_bins = pd.cut(matched_loans['loan_amount'], 
-                      bins=[0, 250000, 350000, 450000, 600000, float('inf')], 
-                      labels=['<$250K', '$250K-350K', '$350K-450K', '$450K-600K', '>$600K'])
-    
-    binned_analysis = matched_loans.groupby([loan_bins, 'low_income_designation']).agg({
-        'interest_rate': ['count', 'mean', 'std'],
-        'applicant_income': 'mean',
-        'dti_numeric': 'mean'
-    }).round(3)
-    
-    binned_analysis.columns = ['count', 'avg_rate', 'std_rate', 'avg_income', 'avg_dti']
-    binned_analysis = binned_analysis.reset_index()
-    binned_analysis = binned_analysis[binned_analysis['count'] >= 5]
-    
-    print(f"\nAverage Interest Rates by Loan Amount Bins:")
-    print(binned_analysis)
-    
-    # Visualization: Rates by loan amount bins
-    # Create labeled version for visualization
-    binned_viz = binned_analysis.copy()
-    binned_viz['cu_type_label'] = binned_viz['low_income_designation'].map({
-        '0': 'Non-Low Income Designated',
-        '1': 'Low Income Designated'
-    })
-    
-    plt.figure(figsize=(14, 7))
-    sns.barplot(x='loan_amount', y='avg_rate', hue='cu_type_label', 
-                data=binned_viz, palette=['steelblue', 'coral'])
-    plt.title('Average Interest Rates by Loan Amount Range', fontsize=14, fontweight='bold')
-    plt.xlabel('Loan Amount Range', fontsize=12)
-    plt.ylabel('Average Interest Rate (%)', fontsize=12)
-    plt.legend(title='Credit Union Type', fontsize=11)
-    plt.xticks(rotation=45)
-    plt.ylim(2, 8)
-    plt.grid(True, alpha=0.3)
-    plt.tight_layout()
-    plt.show()
-    
-    # Rate spread analysis by loan size
-    rate_spreads = []
-    for loan_bin in binned_analysis['loan_amount'].unique():
-        bin_data = binned_analysis[binned_analysis['loan_amount'] == loan_bin]
-        if len(bin_data) == 2:  # Both CU types present
-            low_income_rate = bin_data[bin_data['low_income_designation'] == '1']['avg_rate'].iloc[0]
-            non_low_rate = bin_data[bin_data['low_income_designation'] == '0']['avg_rate'].iloc[0]
-            spread = low_income_rate - non_low_rate
-            rate_spreads.append({
-                'loan_bin': loan_bin,
-                'rate_spread': spread,
-                'low_income_rate': low_income_rate,
-                'non_low_rate': non_low_rate
-            })
-    
-    if rate_spreads:
-        spreads_df = pd.DataFrame(rate_spreads)
-        print(f"\nRate Spreads by Loan Amount (Low Income CU - Non-Low Income CU):")
-        print(spreads_df)
-        
-        # Plot rate spreads
-        plt.figure(figsize=(12, 6))
-        colors = ['red' if x > 0 else 'green' for x in spreads_df['rate_spread']]
-        plt.bar(spreads_df['loan_bin'], spreads_df['rate_spread'], color=colors, alpha=0.7)
-        plt.title('Interest Rate Spread by Loan Amount Range\n(Low Income CU Rate - Non-Low Income CU Rate)', 
-                 fontsize=14, fontweight='bold')
-        plt.xlabel('Loan Amount Range', fontsize=12)
-        plt.ylabel('Rate Spread (percentage points)', fontsize=12)
-        plt.axhline(y=0, color='black', linestyle='-', alpha=0.5)
-        plt.xticks(rotation=45)
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.show()
-        
-        print(f"\nKey Findings:")
-        print(f"- Average rate spread across loan sizes: {spreads_df['rate_spread'].mean():.3f} percentage points")
-        print(f"- Loan ranges where Low Income CUs have higher rates: {(spreads_df['rate_spread'] > 0).sum()}")
-        print(f"- Loan ranges where Low Income CUs have lower rates: {(spreads_df['rate_spread'] < 0).sum()}")
-        print(f"- Largest rate difference: {spreads_df['rate_spread'].abs().max():.3f} percentage points")
-
-    # Also need to create a mapping for visualization labels
-    loans_df_viz = matched_loans.copy()
-    loans_df_viz['cu_type_label'] = loans_df_viz['low_income_designation'].map({
-        '0': 'Non-Low Income Designated',
-        '1': 'Low Income Designated'
-    })
-    
-    # Update the box plot to use labeled data
-    plt.figure(figsize=(12, 6))
-    ax = sns.boxplot(x='cu_type_label', y='interest_rate', data=loans_df_viz, palette=['steelblue', 'coral'])
-    plt.title('Interest Rate Distribution for Similar Loan Profiles', fontsize=14, fontweight='bold')
-    plt.xlabel('Credit Union Type', fontsize=12)
-    plt.ylabel('Interest Rate (%)', fontsize=12)
-    plt.ylim(2, 8)
-    plt.grid(True, alpha=0.3)
-    
-    # Add quartile labels for each credit union type
+# Add median values as text annotations
+for year in [2022, 2023, 2024]:
     for i, cu_type in enumerate(['Non-Low Income Designated', 'Low Income Designated']):
-        cu_data = loans_df_viz[loans_df_viz['cu_type_label'] == cu_type]['interest_rate']
-        
-        if len(cu_data) > 0:
-            q1 = cu_data.quantile(0.25)
-            median = cu_data.median()
-            q3 = cu_data.quantile(0.75)
-            
-            # Add quartile text labels
-            ax.text(i, q3 + 0.1, f'Q3: {q3:.3f}%', ha='center', va='bottom', 
-                   fontsize=10, fontweight='bold', color='darkblue')
-            ax.text(i, median, f'Median: {median:.3f}%', ha='center', va='center', 
-                   fontsize=10, fontweight='bold', color='white', 
-                   bbox=dict(boxstyle='round,pad=0.3', facecolor='red', alpha=0.9))
-            ax.text(i, q1 - 0.1, f'Q1: {q1:.3f}%', ha='center', va='top', 
-                   fontsize=10, fontweight='bold', color='darkblue')
-            
-            # Add sample size
-            ax.text(i, 1.8, f'n = {len(cu_data):,}', ha='center', va='bottom', 
-                   fontsize=9, style='italic', color='gray')
-    
-    plt.tight_layout()
-    plt.show()
+        year_cu_data = yearly_spreads_df[(yearly_spreads_df['activity_year'] == year) & 
+                                        (yearly_spreads_df['cu_type'] == cu_type)]['rate_spread_value'].dropna()
+        if len(year_cu_data) > 0:
+            median_val = year_cu_data.median()
+            x_pos = year - 2022 + (-0.2 + 0.4*i)  # Offset for each CU type
+            ax1.text(x_pos, median_val + 0.1, f'{median_val:.3f}', ha='center', va='bottom', fontsize=8, fontweight='bold',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='lightgray', alpha=0.7))
 
+# Violin plot
+ax2 = axes[0, 1]
+sns.violinplot(x='activity_year', y='rate_spread_value', hue='cu_type', 
+               data=yearly_spreads_df, ax=ax2, palette=colors, split=False)
+ax2.set_title('Distribution Shape by Year', fontsize=12, fontweight='bold')
+ax2.set_ylim(-15, 15)  
+ax2.grid(True, alpha=0.3)
+ax2.legend(loc='lower right')
+
+# Trend lines
+ax3 = axes[0, 2]
+# Plot average (mean) with solid lines
+summary_pivot_mean = summary_stats.pivot(index='activity_year', columns='cu_type', values='mean')
+summary_pivot_mean.plot(kind='line', ax=ax3, color=colors, marker='o', linewidth=2, linestyle='-')
+
+# Plot median with dotted lines
+summary_pivot_median = summary_stats.pivot(index='activity_year', columns='cu_type', values='median')
+summary_pivot_median.plot(kind='line', ax=ax3, color=colors, marker='s', linewidth=2, linestyle=':')
+
+ax3.set_title('Average & Median Rate Spread Trends', fontsize=12, fontweight='bold')
+ax3.set_xlabel('Year', fontsize=12)
+ax3.set_ylabel('Rate Spread (%)', fontsize=12)
+ax3.set_xticks([2022, 2023, 2024])
+ax3.tick_params(axis='x', which='minor', bottom=False)
+ax3.grid(True, alpha=0.3)
+
+# Update legend to show mean vs median
+handles, labels = ax3.get_legend_handles_labels()
+new_labels = []
+for i, label in enumerate(labels):
+    if i < 2:
+        new_labels.append(f'{label} (Average)')
+    else:
+        new_labels.append(f'{label.split("_")[0]} (Median)')
+ax3.legend(handles, new_labels)
+
+# Density plot  
+ax4 = axes[1, 0]
+cu_types = yearly_spreads_df['cu_type'].unique()
+# Create side-by-side histograms
+positions = np.arange(len(cu_types))
+width = 0.35
+
+for i, cu_type in enumerate(cu_types):
+    cu_data = yearly_spreads_df[yearly_spreads_df['cu_type'] == cu_type]['rate_spread_value'].dropna()
+    if len(cu_data) > 0:
+        # Create histogram data
+        counts, bins = np.histogram(cu_data, bins=30, range=(-3, 3))
+        # Normalize to density
+        counts = counts / (len(cu_data) * np.diff(bins)[0])
+        # Plot bars
+        ax4.bar(bins[:-1] + np.diff(bins)[0]/2 + i*0.01, counts, 
+                width=np.diff(bins)[0]*0.8, alpha=0.7, color=colors[i], 
+                label=f'{cu_type} (n={len(cu_data):,})')
+
+ax4.set_title('Overall Distribution Comparison of Rate Spreads', fontsize=12, fontweight='bold')
+ax4.set_xlim(-3, 3)
+ax4.set_xlabel('Rate Spread (%)')
+ax4.set_ylabel('Density')
+ax4.legend(bbox_to_anchor=(0.5, -0.15), loc='upper center', ncol=1)
+ax4.grid(True, alpha=0.3)
+
+# Summary table
+ax5 = axes[1, 1]
+ax5.axis('off')
+table_data = []
+for _, row in summary_stats.iterrows():
+    cu_type_wrapped = row['cu_type'].replace('Low Income Designated', 'Low Income\nDesignated').replace('Non-Low \nIncome Designated', 'Non-Low\nIncome\nDesignated')
+    table_data.append([
+        int(row['activity_year']),
+        cu_type_wrapped,
+        f"{int(row['count']):,}",
+        f"{row['mean']:.3f}",
+        f"{row['median']:.3f}", 
+        f"{row['std']:.3f}"
+    ])
+table = ax5.table(cellText=table_data,
+                 colLabels=['Year', 'CU Type', 'Count', 'Mean', 'Median', 'Std'],
+                 cellLoc='center', loc='center', bbox=[0, 0, 1, 1])
+table.auto_set_font_size(False)
+table.set_fontsize(8)
+table.scale(1, 1.5)
+    
+ax5.set_title('Summary Statistics', fontsize=12, fontweight='bold', pad=20)
+
+# Year-by-year distribution comparison
+ax6 = axes[1, 2]
+year_colors = ['red', 'green', 'royalblue']
+years = [2022, 2023, 2024]
+
+for i, year in enumerate(years):
+    year_data = yearly_spreads_df[yearly_spreads_df['activity_year'] == year]
+    
+    # Low Income Designated
+    low_income_data = year_data[year_data['cu_type'] == 'Low Income Designated']['rate_spread_value'].dropna()
+    if len(low_income_data) > 0:
+        sns.kdeplot(data=low_income_data, ax=ax6, color=year_colors[i], linestyle='--',
+                   label=f'Low Income {year}', 
+                   linewidth=2, alpha=0.8, clip=(-2, 4))
+    
+    # Non-Low Income Designated
+    non_low_income_data = year_data[year_data['cu_type'] == 'Non-Low Income Designated']['rate_spread_value'].dropna()
+    if len(non_low_income_data) > 0:
+        sns.kdeplot(data=non_low_income_data, ax=ax6, color=year_colors[i], linestyle='-',
+                   label=f'Non-Low Income {year}', 
+                   linewidth=2, alpha=0.8, clip=(-2, 4))
+
+ax6.set_title('Rate Spread Density by Year & CU Type', fontsize=12, fontweight='bold')
+ax6.set_xlim(-2, 4)
+ax6.set_ylim(0, 1)
+ax6.set_xlabel('Rate Spread (%)')
+ax6.set_ylabel('Density')
+ax6.legend(bbox_to_anchor=(0.5, -0.25), loc='upper center', ncol=3)
+ax6.grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+ax6.set_ylabel('Density')
+ax6.legend(bbox_to_anchor=(0.5, -0.25), loc='upper center', ncol=3)
+ax6.grid(True, alpha=0.3)
+
+plt.tight_layout()
+plt.show()
+```
+
+Key Observations
+
+- Rate spread dropped from 2022 to 2024 across both CU types (positive spread in 2022 to negative in 2024) indicating that CU unions went from pricing above to prime to at or below prime by 2024
+- Low income designated CUs had higher average and median rate spreads than non-low income designated CUs in 2022 and 2023, but the gap narrowed  by 2024
+
+- Low income designated CUs has much higher variability (std deviation) in rate spreads than non-low income designated CUs, especially in 2022 and 2023, indicating more pricing dispersion within that group (standard underwriting)
+
+- Box plot & violin plot show non-low income CUs have tighter distribution & lower variance thus predicatble pricing while low income CUs have wider distribution, heavy tails in 2024, extremes on both ends (+ and -) thus more unpredictable pricing (higher risk borrowers and more manual underwriting)
+ 
+ - Mean and median show a classic right skew tail risk pattern with mean above median, especially for low income CUs, indicating a subset of loans with much higher rate spreads (higher risk borrowers) that are pulling the average up while most loans are clustered around lower spreads (prime or near prime pricing)
+
+ - Density plot shows non-low income CUs have a more normal distribution centered around 0% spread (prime pricing) while low income CUs have a more skewed distribution with a longer right tail in 2022 and 2023 indicating more loans with higher spreads (higher risk borrowers) but by 2024 both groups show a shift towards negative spreads (below prime pricing) likely due to competitive pressures and economic conditions [need to confirm with macro data]
+
+ -- Mean & median divergence could mean hidden bias risk (median borrowers get good rate, but a subset of higher risk borrowers get much higher rates) which could be a concern for fair lending and regulatory scrutiny if not properly justified by risk factors (manual underwriting, credit risk, etc) [need to analyze loan level data to confirm]
+
+ -- Variance increases for low income CUs could indicate inconsistent pricing logic [need to analyze loan level data to confirm if this is due to manual underwriting, higher risk borrowers, or other factors
+ 
+Questions for further analysis:
+- What borrower and loan characteristics are driving the higher rate spreads and variability for low income designated CUs? (manual underwriting, credit risk, loan amount, etc)
+- How do macroeconomic conditions and competitive pressures correlate with the observed trends in rate spreads over time?
+- Is there evidence of potential bias in pricing for low income designated CUs that could raise fair lending concerns, especially for the subset of loans with much higher rate spreads?
+
+- For tail loans with very high rate spreads, what are the common characteristics (loan amount, credit score, DTI, etc) and how do they differ from the majority of loans with lower spreads? Are these justified by risk factors or could they indicate potential outliers or pricing inconsistencies?
+
+
+# Modeling
+
+
+# Linear Regression: Explain Rate Spread
+
+Objective is to explain why rates spreads vary across loans and understand factors that drive pricing differences
+Y=Rate Spread (APR - Prime)
+
+## Linear Regression Modeling
+```{python}
+#| echo: false
+#| message: false
+#| warning: false
+
+import pandas as pd
+import numpy as np
+import statsmodels.api as sm
+import statsmodels.formula.api as smf
+from sklearn.linear_model import LinearRegression, Ridge
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
+import seaborn as sns
+import matplotlib.pyplot as plt
+from scipy import stats
+import duckdb
+
+# Initialize database connection
+try:
+    # Test if con_filtered exists and is working
+    con_filtered.execute("SELECT 1").fetchone()
+except (NameError, AttributeError):
+    # Create new connection if it doesn't exist
+    con_filtered = duckdb.connect()
+
+regression_query = """
+SELECT
+    activity_year,
+    low_income_designation,
+    TRY_CAST(rate_spread AS FLOAT) AS rate_spread_value,
+    TRY_CAST(interest_rate AS FLOAT) AS interest_rate,
+    TRY_CAST(loan_amount AS FLOAT) AS loan_amount,
+    
+    -- Core applicant characteristics
+    TRY_CAST(income AS FLOAT) AS applicant_income,
+    applicant_race_1,
+    applicant_ethnicity_1,
+    applicant_ethnicity_observed,
+    applicant_sex,
+    applicant_sex_observed,
+    applicant_age,
+    applicant_age_above_62,
+    applicant_credit_scoring_model,
+    
+    -- Financial ratios and loan characteristics
+    CASE WHEN debt_to_income_ratio IS NOT NULL 
+         AND debt_to_income_ratio != 'NA' 
+         AND TRY_CAST(debt_to_income_ratio AS FLOAT) IS NOT NULL
+         THEN CAST(debt_to_income_ratio AS FLOAT) 
+         ELSE NULL END AS dti_ratio,
+    CASE WHEN combined_loan_to_value_ratio IS NOT NULL 
+         AND combined_loan_to_value_ratio != 'NA' 
+         AND TRY_CAST(combined_loan_to_value_ratio AS FLOAT) IS NOT NULL
+         THEN CAST(combined_loan_to_value_ratio AS FLOAT) 
+         ELSE NULL END AS ltv_ratio,
+    TRY_CAST(loan_term AS FLOAT) AS loan_term,
+    TRY_CAST(property_value AS FLOAT) AS property_value,
+    
+    -- Geographic variables
+    state_code,
+    census_tract,
+    county_code,
+    
+    -- Other controls
+    action_taken,
+    loan_purpose
+FROM 'hmda_filtered_2022_2024_filtered.parquet'
+WHERE action_taken IN (1, 2) -- Only approved/originated loans
+  AND rate_spread IS NOT NULL 
+  AND CAST(rate_spread AS VARCHAR) != 'NA'
+  AND TRY_CAST(rate_spread AS FLOAT) IS NOT NULL
+"""
+
+# Execute query and prepare data
+regression_df = con_filtered.execute(regression_query).fetchdf()
+
+print(f"Regression Analysis Dataset: {len(regression_df):,} loans")
+print(f"Rate spread range: {regression_df['rate_spread_value'].min():.3f} to {regression_df['rate_spread_value'].max():.3f}")
+
+# TARGET VARIABLE: rate_spread_value (APR - Average Prime Offer Rate)
+
+regression_df['cu_type_numeric'] = regression_df['low_income_designation'].map({'0': 0, '1': 1})
+regression_df['year_2023'] = (regression_df['activity_year'] == 2023).astype(int)
+regression_df['year_2024'] = (regression_df['activity_year'] == 2024).astype(int)
+
+
+# check if log transformations are needed
+fig, axes = plt.subplots(2, 3, figsize=(12,10))
+fig.suptitle('Distribution Analysis: Original vs Log Transformed Variables', fontsize=16, fontweight='bold')
+
+# Define variables to check
+variables_to_check = [
+    ('loan_amount', 'Loan Amount ($)'),
+    ('applicant_income', 'Applicant Income ($)'), 
+    ('property_value', 'Property Value ($)')
+]
+
+for i, (var, title) in enumerate(variables_to_check):
+    # Check if variable exists and has enough non-null values
+    if var in regression_df.columns:
+        data = regression_df[var].dropna()
+        if len(data) > 100:  # Only plot if we have enough data
+            
+            # Original distribution (top row)
+            ax_orig = axes[0, i]
+            ax_orig.hist(data, bins=50, alpha=0.7, density=True, color='skyblue')
+            ax_orig.set_title(f'{title} - Original')
+            ax_orig.set_xlabel(title)
+            ax_orig.set_ylabel('Density')
+            ax_orig.grid(True, alpha=0.3)
+            
+            # Add statistics
+            mean_val = data.mean()
+            median_val = data.median()
+            skew_val = data.skew()
+            ax_orig.axvline(mean_val, color='red', linestyle='--', alpha=0.8, label=f'Mean: {mean_val:,.0f}')
+            ax_orig.axvline(median_val, color='orange', linestyle='--', alpha=0.8, label=f'Median: {median_val:,.0f}')
+            ax_orig.text(0.05, 0.95, f'Skewness: {skew_val:.2f}', transform=ax_orig.transAxes, 
+                        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8), verticalalignment='top')
+            ax_orig.legend(fontsize=8)
+            
+            # Log transformed distribution (bottom row)
+            ax_log = axes[1, i]
+            log_data = np.log(data + 1)  # Add 1 to avoid log(0)
+            ax_log.hist(log_data, bins=50, alpha=0.7, density=True, color='lightgreen')
+            ax_log.set_title(f'{title} - Log Transformed')
+            ax_log.set_xlabel(f'Log({title})')
+            ax_log.set_ylabel('Density')
+            ax_log.grid(True, alpha=0.3)
+            
+            # Add statistics for log transformed
+            log_mean = log_data.mean()
+            log_median = log_data.median()
+            log_skew = log_data.skew()
+            ax_log.axvline(log_mean, color='red', linestyle='--', alpha=0.8, label=f'Mean: {log_mean:.2f}')
+            ax_log.axvline(log_median, color='orange', linestyle='--', alpha=0.8, label=f'Median: {log_median:.2f}')
+            ax_log.text(0.05, 0.95, f'Skewness: {log_skew:.2f}', transform=ax_log.transAxes,
+                       bbox=dict(boxstyle='round', facecolor='white', alpha=0.8), verticalalignment='top')
+            ax_log.legend(fontsize=8)
+            
+            # Print summary statistics
+            print(f"\n{title}:")
+            print(f"  Original - Mean: {mean_val:,.0f}, Median: {median_val:,.0f}, Skewness: {skew_val:.3f}")
+            print(f"  Log Transform - Skewness: {log_skew:.3f}")
+            print(f"  Transformation {'RECOMMENDED' if abs(skew_val) > 1 and abs(log_skew) < abs(skew_val) else 'NOT NEEDED'}")
+        else:
+            # Hide subplot if not enough data
+            axes[0, i].set_visible(False)
+            axes[1, i].set_visible(False)
+            print(f"\n{title}: Insufficient data ({len(data)} observations)")
+
+plt.tight_layout()
+plt.show()
+
+# Log transformation on skewed variables
+
+regression_df['log_loan_amount'] = np.log(regression_df['loan_amount'] + 1)
+regression_df['log_income'] = np.log(regression_df['applicant_income'] + 1)
+regression_df['log_property_value'] = np.log(regression_df['property_value'] + 1)
+
+# Create ratios and interactions
+regression_df['income_to_loan_ratio'] = regression_df['applicant_income'] / regression_df['loan_amount']
+regression_df['loan_to_property_ratio'] = regression_df['loan_amount'] / regression_df['property_value']
+
+# Encode categorical variables
+le_race = LabelEncoder()
+le_ethnicity = LabelEncoder() 
+le_ethnicity_obs = LabelEncoder()
+le_sex = LabelEncoder()
+le_sex_obs = LabelEncoder()
+le_credit_model = LabelEncoder()
+le_state = LabelEncoder()
+le_age_above_62 = LabelEncoder()
+
+# Convert to string first, then handle nulls to avoid dtype conflicts
+regression_df['race_encoded'] = le_race.fit_transform(
+    regression_df['applicant_race_1'].astype(str).replace(['nan', 'None', '<NA>'], 'Unknown')
+)
+regression_df['ethnicity_encoded'] = le_ethnicity.fit_transform(
+    regression_df['applicant_ethnicity_1'].astype(str).replace(['nan', 'None', '<NA>'], 'Unknown')
+)
+regression_df['ethnicity_obs_encoded'] = le_ethnicity_obs.fit_transform(
+    regression_df['applicant_ethnicity_observed'].astype(str).replace(['nan', 'None', '<NA>'], 'Unknown')
+)
+regression_df['sex_encoded'] = le_sex.fit_transform(
+    regression_df['applicant_sex'].astype(str).replace(['nan', 'None', '<NA>'], 'Unknown')
+)
+regression_df['sex_obs_encoded'] = le_sex_obs.fit_transform(
+    regression_df['applicant_sex_observed'].astype(str).replace(['nan', 'None', '<NA>'], 'Unknown')
+)
+regression_df['credit_model_encoded'] = le_credit_model.fit_transform(
+    regression_df['applicant_credit_scoring_model'].astype(str).replace(['nan', 'None', '<NA>'], 'Unknown')
+)
+regression_df['state_encoded'] = le_state.fit_transform(
+    regression_df['state_code'].astype(str).replace(['nan', 'None', '<NA>'], 'Unknown')
+)
+regression_df['age_above_62_encoded'] = le_age_above_62.fit_transform(
+    regression_df['applicant_age_above_62'].astype(str).replace(['nan', 'None', '<NA>'], 'Unknown')
+)
+
+# Create subsets with complete data for different model specifications
+
+# Core variables (baseline model)
+core_vars = ['rate_spread_value', 'cu_type_numeric', 'year_2023', 'year_2024']
+regression_baseline = regression_df[core_vars]
+
+# Loan characteristics model
+loan_vars = core_vars + ['log_loan_amount', 'log_income', 'dti_ratio', 'ltv_ratio', 'loan_term', 'log_property_value']
+regression_loan_chars = regression_df[loan_vars]
+
+# Demographic model
+demo_vars = core_vars + ['log_loan_amount', 'log_income', 'dti_ratio', 'ltv_ratio', 'applicant_age',
+                        'race_encoded', 'ethnicity_encoded', 'sex_encoded', 'age_above_62_encoded', 'credit_model_encoded']
+regression_demo = regression_df[demo_vars]
+
+# Full model (includes geographic controls)
+full_vars = demo_vars + ['state_encoded', 'loan_term', 'log_property_value']
+regression_full = regression_df[full_vars]
+
+print(f"Baseline model dataset: {len(regression_baseline):,} loans")
+print(f"Loan characteristics dataset: {len(regression_loan_chars):,} loans") 
+print(f"Demographic model dataset: {len(regression_demo):,} loans")
+print(f"Full model dataset: {len(regression_full):,} loans")
+
+# Correlation MATRIX VISUALIZATION
+print("CORRELATION ANALYSIS OF KEY VARIABLES")
+
+# Select key continuous variables for correlation analysis
+corr_vars = ['rate_spread_value', 'cu_type_numeric', 'log_loan_amount', 'log_income', 
+             'dti_ratio', 'ltv_ratio', 'loan_term', 'log_property_value']
+
+# Create correlation matrix with available data
+corr_data = regression_df[corr_vars]
+correlation_matrix = corr_data.corr()
+
+# Create correlogram visualization
+plt.figure(figsize=(8, 8))
+mask = np.triu(np.ones_like(correlation_matrix, dtype=bool))
+
+# Create heatmap
+sns.heatmap(correlation_matrix, 
+            mask=mask,
+            annot=True, 
+            cmap='RdBu_r', 
+            center=0,
+            square=True,
+            fmt='.3f',
+            cbar_kws={"shrink": .8},
+            annot_kws={'size': 9})
+
+plt.title('Correlogram: Key Variables Correlation Matrix\n', 
+          fontsize=12, fontweight='bold', pad=20)
+plt.xlabel('Variables', fontsize=12)
+plt.ylabel('Variables', fontsize=12)
+plt.xticks(rotation=45, ha='right')
+plt.yticks(rotation=0)
+plt.tight_layout()
+plt.show()
+
+
+# DIAGNOSE MISSING DATA PATTERNS
+print("\n" + "="*80)
+print("MISSING DATA ANALYSIS - DIAGNOSING SAMPLE SIZE REDUCTION")
+print("="*80)
+
+# Check data availability for each variable set
+all_vars = ['rate_spread_value', 'cu_type_numeric', 'year_2023', 'year_2024', 
+           'log_loan_amount', 'log_income', 'dti_ratio', 'ltv_ratio', 'loan_term', 'log_property_value',
+           'applicant_age', 'race_encoded', 'ethnicity_encoded', 'sex_encoded', 
+           'age_above_62_encoded', 'credit_model_encoded', 'state_encoded']
+
+print(f"{'Variable':<30} {'Available':<12} {'Missing':<12} {'Missing %':<12} {'Data Type':<15}")
+print("-" * 90)
+
+total_rows = len(regression_df)
+for var in all_vars:
+    if var in regression_df.columns:
+        available = regression_df[var].count()
+        missing = total_rows - available
+        missing_pct = (missing / total_rows) * 100
+        dtype = str(regression_df[var].dtype)
+        print(f"{var:<30} {available:<12,} {missing:<12,} {missing_pct:<11.1f}% {dtype:<15}")
+    else:
+        print(f"{var:<30} {'NOT FOUND':<12} {'-':<12} {'-':<11} {'-':<15}")
+
+# Progressive data loss analysis
+print(f"\n" + "="*60)
+print("PROGRESSIVE DATA LOSS ANALYSIS")
+print("="*60)
+
+# Start with full dataset and add variables progressively
+current_data = regression_df[['rate_spread_value']]
+print(f"Starting with rate_spread_value: {len(current_data):,} loans")
+
+var_groups = [
+    (['cu_type_numeric', 'year_2023', 'year_2024'], 'Core variables'),
+    (['log_loan_amount', 'log_income'], 'Basic loan/income'),
+    (['dti_ratio', 'ltv_ratio'], 'Financial ratios'),
+    (['loan_term', 'log_property_value'], 'Additional loan characteristics'),
+    (['applicant_age'], 'Applicant age'),
+    (['race_encoded', 'ethnicity_encoded', 'sex_encoded'], 'Demographics'),
+    (['age_above_62_encoded', 'credit_model_encoded'], 'Additional demographics'),
+    (['state_encoded'], 'Geographic controls')
+]
+
+cumulative_vars = ['rate_spread_value']
+for vars_to_add, group_name in var_groups:
+    # Add variables that exist
+    existing_vars = [v for v in vars_to_add if v in regression_df.columns]
+    if existing_vars:
+        cumulative_vars.extend(existing_vars)
+        current_data = regression_df[cumulative_vars]
+        print(f"After adding {group_name}: {len(current_data):,} loans ({len(current_data)/len(regression_df)*100:.1f}%)")
+        
+        # Show which specific variables caused the biggest drop
+        if len(existing_vars) > 1:
+            for var in existing_vars:
+                test_vars = cumulative_vars[:-len(existing_vars)] + [var]
+                test_data = regression_df[test_vars]
+                print(f"  - Only {var}: {len(test_data):,} loans")
+    else:
+        print(f"After adding {group_name}: Variables not found in dataset")
+
+# Model 1: Baseline model (CU type + year effects + low income designation)
+
+print("MODEL 1: BASELINE MODEL (CU TYPE, LOW INCOME DESIGNATION + YEAR EFFECTS)")
+
+model1_formula = "rate_spread_value ~ cu_type_numeric + year_2023 + year_2024"
+model1 = smf.ols(model1_formula, data=regression_baseline).fit()
+print(model1.summary())
+
+# Model 2: Loan characteristics model  
+print("\n" + "="*80)
+print("MODEL 2: LOAN CHARACTERISTICS MODEL")
+print("="*80)
+
+model2_formula = """rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 + 
+                    log_loan_amount + log_income + dti_ratio + ltv_ratio + 
+                    loan_term + log_property_value"""
+model2 = smf.ols(model2_formula, data=regression_loan_chars).fit()
+print(model2.summary())
+
+# Model 3: Demographic model (adds borrower characteristics)
+print("\n" + "="*80)
+print("MODEL 3: DEMOGRAPHIC MODEL")
+print("="*80)
+
+model3_formula = """rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 + 
+                    log_loan_amount + log_income + dti_ratio + ltv_ratio + 
+                    applicant_age + race_encoded + ethnicity_encoded + sex_encoded + 
+                    age_above_62_encoded + credit_model_encoded"""
+model3 = smf.ols(model3_formula, data=regression_demo).fit()
+print(model3.summary())
+
+# Model 4: Full model (adds geographic controls)
+print("\n" + "="*80)  
+print("MODEL 4: FULL MODEL (WITH GEOGRAPHIC CONTROLS)")
+print("="*80)
+
+model4_formula = """rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 + 
+                    log_loan_amount + log_income + dti_ratio + ltv_ratio + loan_term + 
+                    log_property_value + applicant_age + race_encoded + ethnicity_encoded + 
+                    sex_encoded + age_above_62_encoded + credit_model_encoded + state_encoded"""
+model4 = smf.ols(model4_formula, data=regression_full).fit()
+print(model4.summary())
+extended_vars = core_vars + ['log_loan_amount', 'log_income', 'interest_rate', 'dti_ratio', 'ltv_ratio']
+regression_extended = regression_df[extended_vars]
+
+if len(regression_extended) > 1000:  # Only run if we have sufficient data
+    print("\n" + "="*80)
+    print("MODEL 3: EXTENDED MODEL (DTI + LTV)")
+    print("="*80)
+    
+    model3_formula = "rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 + log_loan_amount + log_income + interest_rate + dti_ratio + ltv_ratio"
+    model3 = smf.ols(model3_formula, data=regression_extended).fit()
+    print(model3.summary())
+    print(f"Extended model dataset: {len(regression_extended):,} loans")
 else:
-    print("No matched cohorts found with sufficient sample sizes.")
+    print(f"Insufficient data for extended model - only {len(regression_extended):,} complete observations")
+
+# Model 3B: Extended Model WITHOUT DTI (for comparison)
+extended_no_dti_vars = core_vars + ['log_loan_amount', 'log_income', 'ltv_ratio']
+regression_no_dti = regression_df[extended_no_dti_vars]
+
+if len(regression_no_dti) > 1000:  # Only run if we have sufficient data
+    print("\n" + "="*80)
+    print("MODEL 3B: EXTENDED MODEL WITHOUT DTI (LTV ONLY)")
+    print("="*80)
+    
+    model3b_formula = "rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 + log_loan_amount + log_income + ltv_ratio"
+    model3b = smf.ols(model3b_formula, data=regression_no_dti).fit()
+    print(model3b.summary())
+    print(f"No-DTI model dataset: {len(regression_no_dti):,} loans")
+    print(f"Sample size improvement by removing DTI: +{len(regression_no_dti) - len(regression_extended):,} loans")
+else:
+    print(f"Insufficient data for no-DTI model - only {len(regression_no_dti):,} complete observations")
+
+# Model 4: Add demographic variables
+demo_vars = core_vars + ['log_loan_amount', 'log_income', 'interest_rate', 'race_encoded', 'ethnicity_encoded', 'sex_encoded']
+regression_demo = regression_df[demo_vars]
+
+if len(regression_demo) > 1000:
+    print("\n" + "="*80)
+    print("MODEL 4: DEMOGRAPHIC MODEL")
+    print("="*80)
+    
+    model4_formula = "rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 + log_loan_amount + log_income + interest_rate + race_encoded + ethnicity_encoded + sex_encoded"
+    model4 = smf.ols(model4_formula, data=regression_demo).fit()
+    print(model4.summary())
+    print(f"Demographic model dataset: {len(regression_demo):,} loans")
+
+# Model Comparison and Visualization
+print("\n" + "="*80)
+print("MODEL COMPARISON")
+print("="*80)
+
+models = [model1, model2]
+model_names = ['Baseline', 'Loan Characteristics']
+r2_values = [m.rsquared for m in models]
+adj_r2_values = [m.rsquared_adj for m in models]
+aic_values = [m.aic for m in models]
+
+comparison_df = pd.DataFrame({
+    'Model': model_names,
+    'R-squared': r2_values,
+    'Adj R-squared': adj_r2_values,
+    'AIC': aic_values,
+    'N_obs': [m.nobs for m in models]
+})
+
+print(comparison_df.to_string(index=False))
+
+# Residual Analysis
+fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+fig.suptitle('Model 2 Residual Analysis\n(Loan Characteristics Model)', fontsize=16, fontweight='bold')
+
+# Fitted vs Residuals
+ax1 = axes[0, 0]
+fitted_values = model2.fittedvalues
+residuals = model2.resid
+ax1.scatter(fitted_values, residuals, alpha=0.6, s=10)
+ax1.axhline(y=0, color='red', linestyle='--')
+ax1.set_xlabel('Fitted Values')
+ax1.set_ylabel('Residuals')
+ax1.set_title('Fitted vs Residuals')
+ax1.grid(True, alpha=0.3)
+
+# Q-Q Plot
+ax2 = axes[0, 1]
+stats.probplot(residuals, dist="norm", plot=ax2)
+ax2.set_title('Q-Q Plot of Residuals')
+ax2.grid(True, alpha=0.3)
+
+# Histogram of Residuals
+ax3 = axes[1, 0]
+ax3.hist(residuals, bins=50, alpha=0.7, density=True)
+ax3.set_xlabel('Residuals')
+ax3.set_ylabel('Density')
+ax3.set_title('Distribution of Residuals')
+ax3.grid(True, alpha=0.3)
+
+# CU Type Effect Visualization
+ax4 = axes[1, 1]
+cu_type_effect = regression_loan_chars.groupby('cu_type_numeric')['rate_spread_value'].agg(['mean', 'std', 'count']).reset_index()
+cu_type_effect['cu_type'] = cu_type_effect['cu_type_numeric'].map({0: 'Non-Low Income', 1: 'Low Income'})
+
+bars = ax4.bar(cu_type_effect['cu_type'], cu_type_effect['mean'], 
+               yerr=cu_type_effect['std'], capsize=5, alpha=0.7,
+               color=['#001581', '#adadad'])
+ax4.set_ylabel('Average Rate Spread (%)')
+ax4.set_title('Rate Spread by CU Type\n(with std deviation)')
+ax4.grid(True, alpha=0.3, axis='y')
+
+# Add sample sizes on bars
+for i, (bar, count) in enumerate(zip(bars, cu_type_effect['count'])):
+    height = bar.get_height()
+    ax4.text(bar.get_x() + bar.get_width()/2., height + cu_type_effect.iloc[i]['std'] + 0.01,
+             f'n={count:,}', ha='center', va='bottom', fontweight='bold')
+
+plt.tight_layout()
+plt.show()
+
+# Feature Importance Analysis
+print("\n" + "="*80)
+print("COEFFICIENT ANALYSIS - MODEL 2")
+print("="*80)
+
+coef_df = pd.DataFrame({
+    'Variable': model2.params.index,
+    'Coefficient': model2.params.values,
+    'Std_Error': model2.bse.values,
+    'P_Value': model2.pvalues.values,
+    'Conf_Int_Lower': model2.conf_int()[0],
+    'Conf_Int_Upper': model2.conf_int()[1]
+})
+
+coef_df['Significant'] = coef_df['P_Value'] < 0.05
+coef_df = coef_df.sort_values('Coefficient', key=abs, ascending=False)
+
+print(coef_df.to_string(index=False, float_format='%.6f'))
 
 ```
 
-## Next Steps for Analysis
-
-### Additional Analysis Areas:
-- **Geographic Analysis**: Explore geographic factors and bucket analysis by county/MSA
-- **Demographic Deep Dive**: Analyze outcomes by race, ethnicity, and gender within cohorts  
-- **Temporal Trends**: Examine changes in lending patterns over the 2022-2024 period
-- **Advanced Modeling**: Implement logistic regression for denial prediction and random forest for decision analysis
-
-### Research Extensions:
-- Review Michelle Dickerson's research on lending discrimination: https://law.utexas.edu/faculty/mechele-dickerson/
-- Literature review on model risk management and fairness drift monitoring
-- Comparative analysis with other minority-owned depository institutions
-
-### Statistical Tests:
-- Chi-square tests for independence within cohorts
-- T-tests for interest rate differences between groups
-- Logistic regression controlling for loan characteristics
 
 
+#  Logistic Regression 
+Objective is to model high spread loans (e.g. > 1% spread) as a binary classification problem to identify key risk factors and potential bias in pricing for higher risk borrowers
 
-## Advanced modeling
 ```{python}
 #| echo: false
 #| message: false
 #| warning: false
 
 from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, roc_curve
-import warnings
-warnings.filterwarnings('ignore')
+from sklearn.model_selection import train_test_split
+import pandas as pd
+import numpy as np
 
-# Initialize database connection if not already done
-try:
-    # Test if con_filtered exists and is working
-    con_filtered.execute("SELECT 1").fetchone()
-except (NameError, AttributeError):
-    # Create new connection if it doesn't exist
-    con_filtered = duckdb.connect()
+# Create binary target variable for high spread loans using top 10% threshold
+threshold_percentile = 90
+threshold = np.percentile(regression_df['rate_spread_value'].dropna(), threshold_percentile)
+regression_df['high_spread'] = (regression_df['rate_spread_value'] > threshold).astype(int)
 
-# Get comprehensive dataset including denied loans for prediction modeling
-modeling_query = """
-SELECT
-    low_income_designation,
-    activity_year,
-    action_taken,
-    CAST(loan_amount AS FLOAT) AS loan_amount,
-    CASE 
-        WHEN TRY_CAST(interest_rate AS FLOAT) IS NOT NULL AND TRY_CAST(interest_rate AS FLOAT) > 0 
-        THEN CAST(interest_rate AS FLOAT) 
-        ELSE NULL 
-    END AS interest_rate,
-    CASE 
-        WHEN TRY_CAST(income AS FLOAT) IS NOT NULL AND TRY_CAST(income AS FLOAT) > 0 
-        THEN CAST(income AS FLOAT) 
-        ELSE NULL 
-    END AS applicant_income,
-    debt_to_income_ratio,
-    applicant_race_1,
-    applicant_ethnicity_1,
-    applicant_age,
-    loan_purpose,
-    construction_method,
-    occupancy_type,
-    CASE 
-        WHEN TRY_CAST(property_value AS FLOAT) IS NOT NULL AND TRY_CAST(property_value AS FLOAT) > 0 
-        THEN CAST(property_value AS FLOAT) 
-        ELSE NULL 
-    END AS property_value,
-    combined_loan_to_value_ratio
-FROM 'hmda_filtered_2022_2024_filtered.parquet'
-WHERE action_taken IN (1, 2, 3, 7) -- Include approved (1,2) and denied (3,7) loans
-  AND loan_amount IS NOT NULL
-  AND income IS NOT NULL
-  AND applicant_race_1 IS NOT NULL
-"""
+# Analyze distribution of high spread loans
+print("TAIL RISK ANALYSIS - TOP 10% SPREAD LOANS")
+print("="*60)
+print(f"90th percentile threshold: {threshold:.3f}%")
+print(f"Total loans: {len(regression_df):,}")
+print(f"High spread loans (top 10%): {regression_df['high_spread'].sum():,} ({regression_df['high_spread'].mean()*100:.2f}%)")
+print(f"Normal spread loans (bottom 90%): {(regression_df['high_spread']==0).sum():,} ({(1-regression_df['high_spread'].mean())*100:.2f}%)")
 
-modeling_df = con_filtered.execute(modeling_query).fetchdf()
+# High spread by credit union type
+high_spread_by_cu = regression_df.groupby(['cu_type_numeric'])['high_spread'].agg(['count', 'sum', 'mean']).reset_index()
+high_spread_by_cu['cu_type'] = high_spread_by_cu['cu_type_numeric'].map({0: 'Non-Low Income', 1: 'Low Income'})
+high_spread_by_cu['high_spread_rate'] = high_spread_by_cu['mean'] * 100
 
-# Create binary target: 1 for approved (1,2), 0 for denied (3,7)
-modeling_df['approved'] = modeling_df['action_taken'].isin([1, 2]).astype(int)
+print(f"\nTop 10% Spread Rates by Credit Union Type:")
+print(high_spread_by_cu[['cu_type', 'count', 'sum', 'high_spread_rate']].to_string(index=False))
 
-print(f"Total loans for modeling: {len(modeling_df):,}")
-print(f"Overall approval rate: {modeling_df['approved'].mean():.1%}")
+# Prepare data for logistic regression
+log_vars = ['cu_type_numeric', 'year_2023', 'year_2024', 'log_loan_amount', 'log_income', 'dti_ratio', 'ltv_ratio']
+logistic_data = regression_df[log_vars + ['high_spread']].dropna()
 
-print(f"\n=== YEAR TRENDS ANALYSIS ===")
-print(f"\nApproval rates by year:")
-yearly_approval = modeling_df.groupby('activity_year')['approved'].agg(['count', 'mean']).round(3)
-yearly_approval.columns = ['total_loans', 'approval_rate']
-yearly_approval['approval_rate'] = yearly_approval['approval_rate'].round(3)
-print(yearly_approval)
-
-print(f"\nApproval rates by credit union type and year:")
-approval_by_cu_year = modeling_df.groupby(['activity_year', 'low_income_designation'])['approved'].agg(['count', 'mean']).round(3)
-approval_by_cu_year.columns = ['total_loans', 'approval_rate'] 
-cu_year_pivot = approval_by_cu_year.reset_index().pivot(index='activity_year', columns='low_income_designation', values='approval_rate')
-cu_year_pivot.columns = ['Non-Low Income CU', 'Low Income CU']
-cu_year_pivot['Rate_Difference'] = cu_year_pivot['Low Income CU'] - cu_year_pivot['Non-Low Income CU']
-print(cu_year_pivot)
-
-# Visualize year trends
-fig, axes = plt.subplots(2, 2, figsize=(16, 12))
-
-# 1. Overall approval rates by year
-axes[0,0].plot(yearly_approval.index, yearly_approval['approval_rate'], marker='o', linewidth=2, markersize=8)
-axes[0,0].set_title('Overall Approval Rates by Year', fontsize=12, fontweight='bold')
-axes[0,0].set_xlabel('Year')
-axes[0,0].set_ylabel('Approval Rate')
-axes[0,0].grid(True, alpha=0.3)
-axes[0,0].set_ylim(0.8, 1.0)
-
-# 2. Approval rates by CU type over time
-for cu_type, label, color in [('0', 'Non-Low Income CU', 'steelblue'), ('1', 'Low Income CU', 'coral')]:
-    cu_data = modeling_df[modeling_df['low_income_designation'] == cu_type]
-    yearly_cu = cu_data.groupby('activity_year')['approved'].mean()
-    axes[0,1].plot(yearly_cu.index, yearly_cu.values, marker='o', label=label, 
-                   linewidth=2, markersize=8, color=color)
-
-axes[0,1].set_title('Approval Rates by Credit Union Type', fontsize=12, fontweight='bold')
-axes[0,1].set_xlabel('Year')
-axes[0,1].set_ylabel('Approval Rate')
-axes[0,1].legend()
-axes[0,1].grid(True, alpha=0.3)
-axes[0,1].set_ylim(0.8, 1.0)
-
-# 3. Rate difference over time
-axes[1,0].plot(cu_year_pivot.index, cu_year_pivot['Rate_Difference'], 
-               marker='o', linewidth=2, markersize=8, color='purple')
-axes[1,0].axhline(y=0, color='black', linestyle='--', alpha=0.5)
-axes[1,0].set_title('Approval Rate Gap Over Time\n(Low Income CU - Non-Low Income CU)', 
-                    fontsize=12, fontweight='bold')
-axes[1,0].set_xlabel('Year')
-axes[1,0].set_ylabel('Rate Difference')
-axes[1,0].grid(True, alpha=0.3)
-
-# 4. Volume trends
-volume_trends = modeling_df.groupby(['activity_year', 'low_income_designation']).size().unstack()
-volume_trends.columns = ['Non-Low Income CU', 'Low Income CU']
-volume_trends.plot(kind='bar', ax=axes[1,1], color=['steelblue', 'coral'], alpha=0.7)
-axes[1,1].set_title('Application Volume by Credit Union Type', fontsize=12, fontweight='bold')
-axes[1,1].set_xlabel('Year')
-axes[1,1].set_ylabel('Number of Applications')
-axes[1,1].legend()
-axes[1,1].grid(True, alpha=0.3)
-axes[1,1].tick_params(axis='x', rotation=0)
-
-plt.tight_layout()
-plt.show()
-
-# Prepare features for modeling
-feature_df = modeling_df.copy()
-
-# Convert categorical variables to numeric
-le_race = LabelEncoder()
-le_ethnicity = LabelEncoder()
-le_purpose = LabelEncoder()
-le_construction = LabelEncoder()
-le_occupancy = LabelEncoder()
-
-feature_df['race_encoded'] = le_race.fit_transform(feature_df['applicant_race_1'].astype(str).fillna('Unknown'))
-feature_df['ethnicity_encoded'] = le_ethnicity.fit_transform(feature_df['applicant_ethnicity_1'].astype(str).fillna('Unknown'))
-feature_df['purpose_encoded'] = le_purpose.fit_transform(feature_df['loan_purpose'].astype(str).fillna('Unknown'))
-feature_df['construction_encoded'] = le_construction.fit_transform(feature_df['construction_method'].astype(str).fillna('Unknown'))
-feature_df['occupancy_encoded'] = le_occupancy.fit_transform(feature_df['occupancy_type'].astype(str).fillna('Unknown'))
-
-# Convert DTI to numeric
-feature_df['dti_numeric'] = pd.to_numeric(
-    feature_df['debt_to_income_ratio'].replace(['NA', 'Exempt', 'Not applicable'], None), 
-    errors='coerce'
-)
-
-# Convert age ranges to numeric (use midpoint of ranges)
-def convert_age_range(age_str):
-    if pd.isna(age_str) or age_str in ['NA', 'Not applicable']:
-        return None
-    age_str = str(age_str)
-    if '-' in age_str:
-        # Handle ranges like '35-44'
-        try:
-            start, end = age_str.split('-')
-            return (int(start) + int(end)) / 2
-        except:
-            return None
-    elif age_str == '<25':
-        return 22  # Midpoint of reasonable range
-    elif age_str == '>74' or age_str == '74+':
-        return 77  # Reasonable estimate
-    else:
-        try:
-            return float(age_str)
-        except:
-            return None
-
-feature_df['age_numeric'] = feature_df['applicant_age'].apply(convert_age_range)
-
-# Convert loan_to_value_ratio to numeric
-feature_df['ltv_numeric'] = pd.to_numeric(
-    feature_df['combined_loan_to_value_ratio'].replace(['NA', 'Exempt', 'Not applicable'], None),
-    errors='coerce'
-)
-
-# Create income-to-loan ratio
-feature_df['income_to_loan_ratio'] = feature_df['applicant_income'] / feature_df['loan_amount']
-
-# Select features for modeling
-feature_columns = [
-    'low_income_designation', 'activity_year', 'loan_amount', 'applicant_income', 'dti_numeric',
-    'race_encoded', 'ethnicity_encoded', 'age_numeric', 'purpose_encoded',
-    'construction_encoded', 'occupancy_encoded', 'property_value', 
-    'ltv_numeric', 'income_to_loan_ratio'
-]
-
-# Create clean dataset
-model_data = feature_df[feature_columns + ['approved']].dropna()
-print(f"\nClean dataset for modeling: {len(model_data):,} loans")
-
-# Split features and target
-X = model_data[feature_columns]
-y = model_data['approved']
-
-# Convert low_income_designation to numeric
-X['low_income_designation'] = X['low_income_designation'].astype(int)
+print(f"\nLogistic regression dataset: {len(logistic_data):,} loans")
+print(f"High spread rate in analysis sample: {logistic_data['high_spread'].mean()*100:.2f}%")
 
 # Train-test split
+X = logistic_data[log_vars]
+y = logistic_data['high_spread']
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42, stratify=y)
 
-# Scale features for logistic regression
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)
+print(f"Training set: {len(X_train):,} loans ({y_train.mean()*100:.2f}% high spread)")
+print(f"Test set: {len(X_test):,} loans ({y_test.mean()*100:.2f}% high spread)")
 
-# Train logistic regression
-log_reg = LogisticRegression(random_state=42, max_iter=1000)
-log_reg.fit(X_train_scaled, y_train)
+# Logistic Regression Model 1: Basic model
+X_train_basic = X_train[['cu_type_numeric', 'year_2023', 'year_2024']]
+X_test_basic = X_test[['cu_type_numeric', 'year_2023', 'year_2024']]
 
-# Predictions
-y_pred_lr = log_reg.predict(X_test_scaled)
-y_pred_proba_lr = log_reg.predict_proba(X_test_scaled)[:, 1]
+log_model_basic = LogisticRegression(random_state=42)
+log_model_basic.fit(X_train_basic, y_train)
 
-# Model performance
-print(f"\n=== LOGISTIC REGRESSION RESULTS ===")
-print(f"Accuracy: {log_reg.score(X_test_scaled, y_test):.3f}")
-print(f"AUC-ROC: {roc_auc_score(y_test, y_pred_proba_lr):.3f}")
+# Basic model predictions
+y_train_pred_basic = log_model_basic.predict(X_train_basic)
+y_test_pred_basic = log_model_basic.predict(X_test_basic)
+y_train_proba_basic = log_model_basic.predict_proba(X_train_basic)[:, 1]
+y_test_proba_basic = log_model_basic.predict_proba(X_test_basic)[:, 1]
 
-print(f"\nClassification Report:")
-print(classification_report(y_test, y_pred_lr))
+print(f"\nLOGISTIC REGRESSION MODEL 1: BASIC (CU TYPE + YEAR)")
+print("="*60)
+print(f"Training Accuracy: {log_model_basic.score(X_train_basic, y_train):.4f}")
+print(f"Test Accuracy: {log_model_basic.score(X_test_basic, y_test):.4f}")
+print(f"Training AUC-ROC: {roc_auc_score(y_train, y_train_proba_basic):.4f}")
+print(f"Test AUC-ROC: {roc_auc_score(y_test, y_test_proba_basic):.4f}")
 
-# Feature importance (coefficients)
-feature_importance_lr = pd.DataFrame({
-    'feature': feature_columns,
-    'coefficient': log_reg.coef_[0],
-    'abs_coefficient': abs(log_reg.coef_[0])
-}).sort_values('abs_coefficient', ascending=False)
+# Coefficients and Odds Ratios for basic model
+basic_coef = pd.DataFrame({
+    'Variable': ['Intercept'] + list(X_train_basic.columns),
+    'Coefficient': [log_model_basic.intercept_[0]] + list(log_model_basic.coef_[0]),
+})
+basic_coef['Odds_Ratio'] = np.exp(basic_coef['Coefficient'])
+basic_coef['Odds_Ratio_Pct_Change'] = (basic_coef['Odds_Ratio'] - 1) * 100
 
-print(f"\nTop 10 Most Important Features (Logistic Regression):")
-print(feature_importance_lr.head(10))
+print("\nCoefficients and Odds Ratios:")
+print(basic_coef.to_string(index=False, float_format='%.4f'))
 
-# Visualize feature importance
-plt.figure(figsize=(12, 8))
-top_features = feature_importance_lr.head(10)
-colors = ['red' if x < 0 else 'green' for x in top_features['coefficient']]
-plt.barh(range(len(top_features)), top_features['coefficient'], color=colors, alpha=0.7)
-plt.yticks(range(len(top_features)), top_features['feature'])
-plt.xlabel('Coefficient Value (Impact on Approval Probability)')
-plt.title('Logistic Regression Feature Importance\n(Positive = Increases Approval Probability)', 
-         fontsize=14, fontweight='bold')
-plt.axvline(x=0, color='black', linestyle='-', alpha=0.5)
-plt.grid(True, alpha=0.3)
-plt.tight_layout()
-plt.show()
+# Logistic Regression Model 2: Full model with loan characteristics
+log_model_full = LogisticRegression(random_state=42, max_iter=1000)
+log_model_full.fit(X_train, y_train)
 
-# Train Random Forest
-rf_model = RandomForestClassifier(n_estimators=100, random_state=42, max_depth=10)
-rf_model.fit(X_train, y_train)
+# Full model predictions
+y_train_pred_full = log_model_full.predict(X_train)
+y_test_pred_full = log_model_full.predict(X_test)
+y_train_proba_full = log_model_full.predict_proba(X_train)[:, 1]
+y_test_proba_full = log_model_full.predict_proba(X_test)[:, 1]
 
-# Predictions
-y_pred_rf = rf_model.predict(X_test)
-y_pred_proba_rf = rf_model.predict_proba(X_test)[:, 1]
+print(f"\nLOGISTIC REGRESSION MODEL 2: WITH LOAN CHARACTERISTICS")
+print("="*60)
+print(f"Training Accuracy: {log_model_full.score(X_train, y_train):.4f}")
+print(f"Test Accuracy: {log_model_full.score(X_test, y_test):.4f}")
+print(f"Training AUC-ROC: {roc_auc_score(y_train, y_train_proba_full):.4f}")
+print(f"Test AUC-ROC: {roc_auc_score(y_test, y_test_proba_full):.4f}")
 
-# Model performance
-print(f"\n=== RANDOM FOREST RESULTS ===")
-print(f"Accuracy: {rf_model.score(X_test, y_test):.3f}")
-print(f"AUC-ROC: {roc_auc_score(y_test, y_pred_proba_rf):.3f}")
+# Coefficients and Odds Ratios for full model
+full_coef = pd.DataFrame({
+    'Variable': ['Intercept'] + list(X_train.columns),
+    'Coefficient': [log_model_full.intercept_[0]] + list(log_model_full.coef_[0]),
+})
+full_coef['Odds_Ratio'] = np.exp(full_coef['Coefficient'])
+full_coef['Odds_Ratio_Pct_Change'] = (full_coef['Odds_Ratio'] - 1) * 100
 
-print(f"\nClassification Report:")
-print(classification_report(y_test, y_pred_rf))
+print("\nCoefficients and Odds Ratios:")
+print(full_coef.to_string(index=False, float_format='%.4f'))
 
-# Feature importance
-feature_importance_rf = pd.DataFrame({
-    'feature': feature_columns,
-    'importance': rf_model.feature_importances_
-}).sort_values('importance', ascending=False)
+# Detailed Classification Reports
+print(f"\nCLASSIFICATION REPORT - BASIC MODEL (TEST SET)")
+print("="*50)
+print(classification_report(y_test, y_test_pred_basic, target_names=['Normal Spread', 'High Spread']))
 
-print(f"\nTop 10 Most Important Features (Random Forest):")
-print(feature_importance_rf.head(10))
+print(f"\nCLASSIFICATION REPORT - FULL MODEL (TEST SET)")
+print("="*50)
+print(classification_report(y_test, y_test_pred_full, target_names=['Normal Spread', 'High Spread']))
 
-# Visualize feature importance
-plt.figure(figsize=(12, 8))
-top_features_rf = feature_importance_rf.head(10)
-plt.barh(range(len(top_features_rf)), top_features_rf['importance'], color='steelblue', alpha=0.7)
-plt.yticks(range(len(top_features_rf)), top_features_rf['feature'])
-plt.xlabel('Feature Importance Score')
-plt.title('Random Forest Feature Importance\n(Higher = More Important for Decision)', 
-         fontsize=14, fontweight='bold')
-plt.grid(True, alpha=0.3)
-plt.tight_layout()
-plt.show()
+# Confusion Matrices
+print(f"\nCONFUSION MATRICES")
+print("="*30)
+print("Basic Model (Test Set):")
+print(confusion_matrix(y_test, y_test_pred_basic))
+print("\nFull Model (Test Set):")
+print(confusion_matrix(y_test, y_test_pred_full))
 
-# Compare model performance
-plt.figure(figsize=(12, 5))
+# Key insights about CU type effect
+cu_odds_ratio = np.exp(log_model_full.coef_[0][0])  # cu_type_numeric coefficient
+cu_effect_pct = (cu_odds_ratio - 1) * 100
+
+print(f"\nKEY FINDING - CREDIT UNION TYPE EFFECT:")
+print("="*45)
+print(f"Low Income Designated CUs have {cu_odds_ratio:.3f}x odds of top 10% spread loans")
+print(f"This represents a {cu_effect_pct:+.1f}% {'increase' if cu_effect_pct > 0 else 'decrease'} in odds")
+print(f"Coefficient: {log_model_full.coef_[0][0]:.4f}")
+
+# Model comparison visualization
+plt.figure(figsize=(15, 10))
 
 # ROC Curves
-plt.subplot(1, 2, 1)
-fpr_lr, tpr_lr, _ = roc_curve(y_test, y_pred_proba_lr)
-fpr_rf, tpr_rf, _ = roc_curve(y_test, y_pred_proba_rf)
+plt.subplot(2, 3, 1)
+fpr_basic, tpr_basic, _ = roc_curve(y_test, y_test_proba_basic)
+fpr_full, tpr_full, _ = roc_curve(y_test, y_test_proba_full)
 
-plt.plot(fpr_lr, tpr_lr, label=f'Logistic Regression (AUC = {roc_auc_score(y_test, y_pred_proba_lr):.3f})')
-plt.plot(fpr_rf, tpr_rf, label=f'Random Forest (AUC = {roc_auc_score(y_test, y_pred_proba_rf):.3f})')
-plt.plot([0, 1], [0, 1], 'k--', label='Random Baseline')
+plt.plot(fpr_basic, tpr_basic, label=f'Basic Model (AUC = {roc_auc_score(y_test, y_test_proba_basic):.3f})', linewidth=2)
+plt.plot(fpr_full, tpr_full, label=f'Full Model (AUC = {roc_auc_score(y_test, y_test_proba_full):.3f})', linewidth=2)
+plt.plot([0, 1], [0, 1], 'k--', alpha=0.6, label='Random Classifier')
 plt.xlabel('False Positive Rate')
 plt.ylabel('True Positive Rate')
-plt.title('ROC Curves Comparison')
+plt.title('ROC Curves: Top 10% Spread Prediction')
 plt.legend()
 plt.grid(True, alpha=0.3)
 
-# Model accuracy comparison
-plt.subplot(1, 2, 2)
-models = ['Logistic Regression', 'Random Forest']
-accuracies = [log_reg.score(X_test_scaled, y_test), rf_model.score(X_test, y_test)]
-aucs = [roc_auc_score(y_test, y_pred_proba_lr), roc_auc_score(y_test, y_pred_proba_rf)]
+# Feature Importance (Odds Ratios) - Full Model
+plt.subplot(2, 3, 2)
+odds_ratios = np.exp(log_model_full.coef_[0])
+feature_names = list(X_train.columns)
 
-x_pos = np.arange(len(models))
+# Sort by absolute log odds (coefficient magnitude)
+sorted_idx = np.argsort(np.abs(log_model_full.coef_[0]))[::-1]
+sorted_features = [feature_names[i] for i in sorted_idx]
+sorted_odds = [odds_ratios[i] for i in sorted_idx]
+
+colors = ['red' if or_val > 1 else 'blue' for or_val in sorted_odds]
+bars = plt.barh(range(len(sorted_features)), sorted_odds, color=colors, alpha=0.7)
+plt.yticks(range(len(sorted_features)), sorted_features)
+plt.xlabel('Odds Ratio')
+plt.title('Feature Importance (Odds Ratios)\nRed = Increases Risk, Blue = Decreases Risk')
+plt.axvline(x=1, color='black', linestyle='--', alpha=0.8, label='Neutral (OR=1)')
+plt.grid(True, alpha=0.3, axis='x')
+plt.legend()
+
+# Add odds ratio labels
+for i, (bar, or_val) in enumerate(zip(bars, sorted_odds)):
+    plt.text(or_val + 0.01 if or_val > 1 else or_val - 0.01, bar.get_y() + bar.get_height()/2, 
+             f'{or_val:.3f}', va='center', ha='left' if or_val > 1 else 'right', fontweight='bold', fontsize=9)
+
+# Predicted Probability Distribution
+plt.subplot(2, 3, 3)
+plt.hist(y_test_proba_full[y_test == 0], bins=30, alpha=0.7, label='Normal Spread', color='blue', density=True)
+plt.hist(y_test_proba_full[y_test == 1], bins=30, alpha=0.7, label='Top 10% Spread', color='red', density=True)
+plt.xlabel('Predicted Probability')
+plt.ylabel('Density')
+plt.title('Predicted Probability Distribution')
+plt.legend()
+plt.grid(True, alpha=0.3)
+
+# High spread characteristics by CU type
+plt.subplot(2, 3, 4)
+cu_spread_data = logistic_data.groupby(['cu_type_numeric', 'high_spread']).size().reset_index(name='count')
+cu_spread_pivot = cu_spread_data.pivot(index='cu_type_numeric', columns='high_spread', values='count')
+cu_spread_pct = cu_spread_pivot.div(cu_spread_pivot.sum(axis=1), axis=0) * 100
+
+cu_spread_pct.plot(kind='bar', ax=plt.gca(), color=['lightblue', 'darkred'], alpha=0.8)
+plt.title('High Spread Distribution by CU Type')
+plt.xlabel('CU Type (0=Non-Low Income, 1=Low Income)')
+plt.ylabel('Percentage (%)')
+plt.legend(['Normal Spread', 'Top 10% Spread'])
+plt.xticks(rotation=0)
+plt.grid(True, alpha=0.3, axis='y')
+
+# Model Performance Comparison
+plt.subplot(2, 3, 5)
+models = ['Basic Model', 'Full Model']
+train_acc = [log_model_basic.score(X_train_basic, y_train), log_model_full.score(X_train, y_train)]
+test_acc = [log_model_basic.score(X_test_basic, y_test), log_model_full.score(X_test, y_test)]
+train_auc = [roc_auc_score(y_train, y_train_proba_basic), roc_auc_score(y_train, y_train_proba_full)]
+test_auc = [roc_auc_score(y_test, y_test_proba_basic), roc_auc_score(y_test, y_test_proba_full)]
+
+x = np.arange(len(models))
 width = 0.35
 
-plt.bar(x_pos - width/2, accuracies, width, label='Accuracy', alpha=0.7)
-plt.bar(x_pos + width/2, aucs, width, label='AUC-ROC', alpha=0.7)
-plt.xlabel('Model')
-plt.ylabel('Score')
+plt.bar(x - width/2, test_acc, width, label='Test Accuracy', alpha=0.8, color='lightblue')
+plt.bar(x + width/2, test_auc, width, label='Test AUC', alpha=0.8, color='darkblue')
+
+plt.xlabel('Models')
+plt.ylabel('Performance Score')
 plt.title('Model Performance Comparison')
-plt.xticks(x_pos, models)
+plt.xticks(x, models)
 plt.legend()
-plt.grid(True, alpha=0.3)
-plt.ylim(0.8, 1.0)
+plt.grid(True, alpha=0.3, axis='y')
+plt.ylim(0, 1)
+
+# Add value labels
+for i, (acc, auc) in enumerate(zip(test_acc, test_auc)):
+    plt.text(i - width/2, acc + 0.01, f'{acc:.3f}', ha='center', va='bottom', fontweight='bold')
+    plt.text(i + width/2, auc + 0.01, f'{auc:.3f}', ha='center', va='bottom', fontweight='bold')
+
+# Coefficient Comparison
+plt.subplot(2, 3, 6)
+coef_comparison = pd.DataFrame({
+    'Variable': ['cu_type_numeric', 'year_2023', 'year_2024'],
+    'Basic_Model': log_model_basic.coef_[0],
+    'Full_Model': log_model_full.coef_[0][:3]
+})
+
+x = np.arange(len(coef_comparison))
+width = 0.35
+
+plt.bar(x - width/2, coef_comparison['Basic_Model'], width, label='Basic Model', alpha=0.8)
+plt.bar(x + width/2, coef_comparison['Full_Model'], width, label='Full Model', alpha=0.8)
+
+plt.xlabel('Variables')
+plt.ylabel('Coefficient')
+plt.title('Coefficient Comparison')
+plt.xticks(x, coef_comparison['Variable'], rotation=45)
+plt.legend()
+plt.grid(True, alpha=0.3, axis='y')
+plt.axhline(y=0, color='red', linestyle='--', alpha=0.5)
 
 plt.tight_layout()
 plt.show()
 
-# Analyze low_income_designation impact
-cu_impact_lr = feature_importance_lr[feature_importance_lr['feature'] == 'low_income_designation']
-cu_impact_rf = feature_importance_rf[feature_importance_rf['feature'] == 'low_income_designation']
-
-print(f"\n=== CREDIT UNION TYPE IMPACT ANALYSIS ===")
-print(f"Low Income Designation Impact:")
-print(f"- Logistic Regression Coefficient: {cu_impact_lr['coefficient'].iloc[0]:.4f}")
-print(f"- Random Forest Importance Rank: {cu_impact_rf.index[0] + 1} out of {len(feature_columns)}")
-print(f"- Random Forest Importance Score: {cu_impact_rf['importance'].iloc[0]:.4f}")
-
-if cu_impact_lr['coefficient'].iloc[0] > 0:
-    print(f"- Impact: Low Income Designated CUs have HIGHER approval probability")
-elif cu_impact_lr['coefficient'].iloc[0] < 0:
-    print(f"- Impact: Low Income Designated CUs have LOWER approval probability")
-else:
-    print(f"- Impact: Minimal difference in approval probability")
-
-# Cross-validation for robustness
-cv_scores_lr = cross_val_score(log_reg, X_train_scaled, y_train, cv=5)
-cv_scores_rf = cross_val_score(rf_model, X_train, y_train, cv=5)
-
-print(f"\n=== MODEL ROBUSTNESS (5-Fold Cross-Validation) ===")
-print(f"Logistic Regression CV Accuracy: {cv_scores_lr.mean():.3f} ± {cv_scores_lr.std():.3f}")
-print(f"Random Forest CV Accuracy: {cv_scores_rf.mean():.3f} ± {cv_scores_rf.std():.3f}")
-
-# YEAR-SPECIFIC ANALYSIS
-print(f"\n" + "="*60)
-print("YEAR-SPECIFIC MODELING ANALYSIS")
+# High spread loan characteristics by CU type
+print(f"\nTOP 10% SPREAD LOAN CHARACTERISTICS BY CU TYPE")
 print("="*60)
 
-# Train separate models for each year to see how factors change over time
-years = sorted(model_data['activity_year'].unique())
-year_results = {}
-
-for year in years:
-    print(f"\n=== {year} ANALYSIS ===")
-    year_data = model_data[model_data['activity_year'] == year]
+for cu_type in [0, 1]:
+    cu_name = 'Non-Low Income' if cu_type == 0 else 'Low Income'
+    cu_data = logistic_data[logistic_data['cu_type_numeric'] == cu_type]
+    high_spread_cu = cu_data[cu_data['high_spread'] == 1]
+    normal_spread_cu = cu_data[cu_data['high_spread'] == 0]
     
-    if len(year_data) < 100:
-        print(f"Insufficient data for {year} (only {len(year_data)} records)")
-        continue
+    print(f"\n{cu_name} Designated CUs:")
+    print(f"  Top 10% spread loans: {len(high_spread_cu):,} ({len(high_spread_cu)/len(cu_data)*100:.2f}%)")
+    
+    if len(high_spread_cu) > 0 and len(normal_spread_cu) > 0:
+        print(f"  Avg loan amount - Top 10%: ${np.exp(high_spread_cu['log_loan_amount'].mean()):,.0f}, Bottom 90%: ${np.exp(normal_spread_cu['log_loan_amount'].mean()):,.0f}")
+        print(f"  Avg income - Top 10%: ${np.exp(high_spread_cu['log_income'].mean()):,.0f}, Bottom 90%: ${np.exp(normal_spread_cu['log_income'].mean()):,.0f}")
         
-    X_year = year_data[feature_columns]
-    y_year = year_data['approved']
-    X_year['low_income_designation'] = X_year['low_income_designation'].astype(int)
-    
-    # Train-test split for the year
-    if len(year_data) > 500:
-        X_train_year, X_test_year, y_train_year, y_test_year = train_test_split(
-            X_year, y_year, test_size=0.2, random_state=42, stratify=y_year
-        )
-    else:
-        # Use all data for smaller samples
-        X_train_year, X_test_year, y_train_year, y_test_year = X_year, X_year, y_year, y_year
-    
-    # Scale features
-    scaler_year = StandardScaler()
-    X_train_year_scaled = scaler_year.fit_transform(X_train_year)
-    X_test_year_scaled = scaler_year.transform(X_test_year)
-    
-    # Train logistic regression for the year
-    lr_year = LogisticRegression(random_state=42, max_iter=1000)
-    lr_year.fit(X_train_year_scaled, y_train_year)
-    
-    # Get predictions and performance
-    y_pred_year = lr_year.predict(X_test_year_scaled)
-    y_pred_proba_year = lr_year.predict_proba(X_test_year_scaled)[:, 1]
-    
-    accuracy = lr_year.score(X_test_year_scaled, y_test_year)
-    auc = roc_auc_score(y_test_year, y_pred_proba_year) if len(np.unique(y_test_year)) > 1 else 0
-    
-    # Get coefficient for low_income_designation
-    cu_coefficient = lr_year.coef_[0][feature_columns.index('low_income_designation')]
-    
-    year_results[year] = {
-        'n_samples': len(year_data),
-        'approval_rate': y_year.mean(),
-        'accuracy': accuracy,
-        'auc': auc,
-        'cu_coefficient': cu_coefficient,
-        'coefficients': lr_year.coef_[0]
-    }
-    
-    print(f"Sample size: {len(year_data):,}")
-    print(f"Approval rate: {y_year.mean():.1%}")
-    print(f"Model accuracy: {accuracy:.3f}")
-    print(f"AUC-ROC: {auc:.3f}")
-    print(f"Low Income Designation coefficient: {cu_coefficient:.4f}")
-    
-    # Approval rates by CU type for this year
-    year_cu_rates = year_data.groupby('low_income_designation')['approved'].mean()
-    if len(year_cu_rates) == 2:
-        rate_diff = year_cu_rates[1] - year_cu_rates[0]  # Low income - Non-low income
-        print(f"Approval rate difference (Low Income - Non-Low Income): {rate_diff:+.3f}")
-
-# Visualize year trends in model factors
-if year_results:
-    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
-    
-    years_list = list(year_results.keys())
-    
-    # 1. Model accuracy over time
-    accuracies = [year_results[year]['accuracy'] for year in years_list]
-    aucs = [year_results[year]['auc'] for year in years_list]
-    
-    axes[0,0].plot(years_list, accuracies, marker='o', label='Accuracy', linewidth=2, color='blue')
-    axes[0,0].plot(years_list, aucs, marker='s', label='AUC-ROC', linewidth=2, color='green')
-    axes[0,0].set_title('Model Performance Over Time', fontsize=12, fontweight='bold')
-    axes[0,0].set_xlabel('Year')
-    axes[0,0].set_ylabel('Score')
-    axes[0,0].legend()
-    axes[0,0].grid(True, alpha=0.3)
-    axes[0,0].set_ylim(0.8, 1.0)
-    
-    # 2. CU coefficient over time (impact of being low income designated)
-    cu_coefficients = [year_results[year]['cu_coefficient'] for year in years_list]
-    axes[0,1].plot(years_list, cu_coefficients, marker='o', linewidth=2, color='purple')
-    axes[0,1].axhline(y=0, color='black', linestyle='--', alpha=0.5)
-    axes[0,1].set_title('Low Income Designation Impact Over Time\n(Coefficient in Logistic Regression)', 
-                       fontsize=12, fontweight='bold')
-    axes[0,1].set_xlabel('Year')
-    axes[0,1].set_ylabel('Coefficient Value')
-    axes[0,1].grid(True, alpha=0.3)
-    
-    # 3. Sample sizes over time
-    sample_sizes = [year_results[year]['n_samples'] for year in years_list]
-    axes[1,0].bar(years_list, sample_sizes, alpha=0.7, color='orange')
-    axes[1,0].set_title('Sample Sizes by Year', fontsize=12, fontweight='bold')
-    axes[1,0].set_xlabel('Year')
-    axes[1,0].set_ylabel('Number of Loans')
-    axes[1,0].grid(True, alpha=0.3)
-    
-    # 4. Top feature importance changes over time
-    if len(years_list) >= 2:
-        # Compare feature importance between first and last year
-        first_year = years_list[0]
-        last_year = years_list[-1]
+        dti_high = high_spread_cu['dti_ratio'].mean()
+        dti_normal = normal_spread_cu['dti_ratio'].mean()
+        print(f"  Avg DTI - Top 10%: {dti_high:.2f}%, Bottom 90%: {dti_normal:.2f}%")
         
-        feature_changes = []
-        for i, feature in enumerate(feature_columns):
-            first_coef = abs(year_results[first_year]['coefficients'][i])
-            last_coef = abs(year_results[last_year]['coefficients'][i])
-            change = last_coef - first_coef
-            feature_changes.append({'feature': feature, 'change': change, 'first': first_coef, 'last': last_coef})
-        
-        feature_changes_df = pd.DataFrame(feature_changes).sort_values('change', key=abs, ascending=False)
-        top_changes = feature_changes_df.head(8)
-        
-        colors = ['red' if x < 0 else 'green' for x in top_changes['change']]
-        axes[1,1].barh(range(len(top_changes)), top_changes['change'], color=colors, alpha=0.7)
-        axes[1,1].set_yticks(range(len(top_changes)))
-        axes[1,1].set_yticklabels(top_changes['feature'])
-        axes[1,1].set_title(f'Feature Importance Changes\n({first_year} to {last_year})', 
-                           fontsize=12, fontweight='bold')
-        axes[1,1].set_xlabel('Change in Absolute Coefficient')
-        axes[1,1].axvline(x=0, color='black', linestyle='-', alpha=0.5)
-        axes[1,1].grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.show()
-    
-    # Summary of year trends
-    print(f"\n=== SUMMARY OF YEAR TRENDS ===")
-    cu_coeffs = [year_results[year]['cu_coefficient'] for year in years_list]
-    if len(cu_coeffs) > 1:
-        coeff_trend = cu_coeffs[-1] - cu_coeffs[0]
-        print(f"Change in Low Income Designation impact ({years_list[0]} to {years_list[-1]}): {coeff_trend:+.4f}")
-        
-        if coeff_trend > 0.01:
-            print("- Trend: Low Income Designated CUs became MORE favorable to approvals over time")
-        elif coeff_trend < -0.01:
-            print("- Trend: Low Income Designated CUs became LESS favorable to approvals over time")
-        else:
-            print("- Trend: Minimal change in Low Income Designation impact over time")
-    
-    accuracy_trend = accuracies[-1] - accuracies[0] if len(accuracies) > 1 else 0
-    print(f"Model predictability change: {accuracy_trend:+.3f}")
-    
-    if accuracy_trend > 0.01:
-        print("- Lending decisions became more predictable over time")
-    elif accuracy_trend < -0.01:
-        print("- Lending decisions became less predictable over time")
-    else:
-        print("- Lending predictability remained stable over time")
-        
-    volume_trend = sample_sizes[-1] / sample_sizes[0] if len(sample_sizes) > 1 and sample_sizes[0] > 0 else 1
-    print(f"Application volume change: {(volume_trend-1)*100:+.1f}%")
+        ltv_high = high_spread_cu['ltv_ratio'].mean()
+        ltv_normal = normal_spread_cu['ltv_ratio'].mean()
+        print(f"  Avg LTV - Top 10%: {ltv_high:.2f}%, Bottom 90%: {ltv_normal:.2f}%")
 
 ```
+
+# Segment by borrower characteristics
+
+income bands
+loan amount
+tract income
+race/ethnicity
+
+
+# Compute fairness metrics
+Approval rate differences
+pricing disparities
+Equalized 1. 
+
+# Analyze tail risk 
+Look at top 5% spread and understand the extreme pricing cases
+
+
+
+2. second
+3. third
