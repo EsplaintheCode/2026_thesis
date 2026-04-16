@@ -1,6 +1,6 @@
 ---
 title: "Fairness Drift in Mortgage Lending"
-subtitle: Comparing Minority-Owned and Non-Minority-Owned Banks, Savings Associations, and Credit Unions in Denial and Pricing Outcomes"
+subtitle: "Comparing Low Incomed and Non-Low Income Designated Credit Unions in Pricing Outcomes"
 author: 
   - name: "Amy Esplain"
     affiliations:
@@ -60,95 +60,101 @@ import pandas as pd
 import os
 import duckdb
 
-# Combine HMDA files across 2022-2024
-
-FILES = [
-    "raw_data/raw_data/2022_combined_mlar_header.txt",
-    "raw_data/raw_data/2023_combined_mlar_header.txt",
-    "raw_data/raw_data/2024_combined_mlar_header.txt",
-]
-
-# Read LEIs and Low Income Designation
-cu_list = pd.read_excel("Final_CU_List.xlsx")
-cu_data = cu_list[['LEI', 'Low Income Designation']].dropna(subset=['LEI']).drop_duplicates(subset=['LEI'])
-print(f"Loaded {len(cu_data)} unique LEIs with Low Income Designation from Final_CU_List.xlsx")
-
-lei_col = "lei"
-
-con = duckdb.connect("hmda.duckdb")
-
-# Temp table with LEI and Low Income Designation
-con.execute("CREATE TEMP TABLE target_lei(lei VARCHAR, low_income_designation VARCHAR)")
-cu_tuples = [(row['LEI'], row['Low Income Designation']) for _, row in cu_data.iterrows()]
-con.executemany("INSERT INTO target_lei VALUES (?, ?)", cu_tuples)
-files_sql = ", ".join([f"'{f}'" for f in FILES])
-
-
-# Standard HMDA columns to exclude (high null percentage)
-exclude_cols = [
-    'applicant_ethnicity_2', 'applicant_ethnicity_3', 'applicant_ethnicity_4', 'applicant_ethnicity_5',
-    'co_applicant_ethnicity_2', 'co_applicant_ethnicity_3', 'co_applicant_ethnicity_4', 'co_applicant_ethnicity_5',
-    'applicant_race_2', 'applicant_race_3', 'applicant_race_4', 'applicant_race_5',
-    'co_applicant_race_2', 'co_applicant_race_3', 'co_applicant_race_4', 'co_applicant_race_5',
-    'denial_reason_2', 'denial_reason_3', 'denial_reason_4',
-    'total_points_and_fees', 'discount_points', 'lender_credits', 'prepayment_penalty_term',
-    'intro_rate_period', 'aus_2', 'aus_3', 'aus_4', 'aus_5', 'multifamily_affordable_units']
-
-
-# Drop columns with >80% null values
-if exclude_cols:
-    exclude_sql = ", ".join(exclude_cols)
-    print(f"Using EXCLUDE clause with {len(exclude_cols)} columns")
-    sql_query = f"""
-COPY (
-  SELECT h.* EXCLUDE ({exclude_sql}), 
-         t.low_income_designation
-  FROM read_csv_auto([{files_sql}], delim='|', header=true, union_by_name=true, files_to_sniff=-1) h
-  INNER JOIN target_lei t
-    ON h.{lei_col} = t.lei
-) TO 'hmda_filtered_2022_2024.parquet' (FORMAT PARQUET);
-"""
-else:
-    print("No columns to exclude")
-    sql_query = f"""
-COPY (
-  SELECT h.*, 
-         t.low_income_designation
-  FROM read_csv_auto([{files_sql}], delim='|', header=true, union_by_name=true, files_to_sniff=-1) h
-  INNER JOIN target_lei t
-    ON h.{lei_col} = t.lei
-) TO 'hmda_filtered_2022_2024.parquet' (FORMAT PARQUET);
-"""
+# Check if processed files already exist
+if not os.path.exists("hmda_filtered_2022_2024_filtered.parquet"):
+    print("Processing HMDA data files...")
     
-con.execute(sql_query)
+    # Combine HMDA files across 2022-2024
+    FILES = [
+        "raw_data/raw_data/2022_combined_mlar_header.txt",
+        "raw_data/raw_data/2023_combined_mlar_header.txt",
+        "raw_data/raw_data/2024_combined_mlar_header.txt",
+    ]
 
-# Print summary of what was processed
-total_records = con.execute("SELECT COUNT(*) FROM 'hmda_filtered_2022_2024.parquet'").fetchone()[0]
-columns_after = con.execute("DESCRIBE SELECT * FROM 'hmda_filtered_2022_2024.parquet' LIMIT 0").fetchall()
-print(f"Total records: {total_records:,}")
-print(f"Final columns: {len(columns_after)}")
-print(f"Columns excluded: {len(exclude_cols)}")
+    # Read LEIs and Low Income Designation
+    cu_list = pd.read_excel("Final_CU_List.xlsx")
+    cu_data = cu_list[['LEI', 'Low Income Designation']].dropna(subset=['LEI']).drop_duplicates(subset=['LEI'])
+    print(f"Loaded {len(cu_data)} unique LEIs with Low Income Designation from Final_CU_List.xlsx")
+
+    lei_col = "lei"
+
+    con = duckdb.connect("hmda_temp.duckdb")
+
+    # Temp table with LEI and Low Income Designation
+    con.execute("CREATE TEMP TABLE target_lei(lei VARCHAR, low_income_designation VARCHAR)")
+    cu_tuples = [(row['LEI'], row['Low Income Designation']) for _, row in cu_data.iterrows()]
+    con.executemany("INSERT INTO target_lei VALUES (?, ?)", cu_tuples)
+    files_sql = ", ".join([f"'{f}'" for f in FILES])
 
 
-### Filter the data
-# conventional, owner-occupied, first-lien loans for 1-4 family properties for home purchases, action taken 1 loan originated, 2 approved not accepted, 3 denied, excludes reverse mortgage, not an open end line of credit, and not a manufactured home loan
+    # Standard HMDA columns to exclude (high null percentage)
+    exclude_cols = [
+        'applicant_ethnicity_2', 'applicant_ethnicity_3', 'applicant_ethnicity_4', 'applicant_ethnicity_5',
+        'co_applicant_ethnicity_2', 'co_applicant_ethnicity_3', 'co_applicant_ethnicity_4', 'co_applicant_ethnicity_5',
+        'applicant_race_2', 'applicant_race_3', 'applicant_race_4', 'applicant_race_5',
+        'co_applicant_race_2', 'co_applicant_race_3', 'co_applicant_race_4', 'co_applicant_race_5',
+        'denial_reason_2', 'denial_reason_3', 'denial_reason_4',
+        'total_points_and_fees', 'discount_points', 'lender_credits', 'prepayment_penalty_term',
+        'intro_rate_period', 'aus_2', 'aus_3', 'aus_4', 'aus_5', 'multifamily_affordable_units']
 
-con.execute("""
-COPY (
-  SELECT *
-  FROM 'hmda_filtered_2022_2024.parquet'
-  WHERE loan_type = 1 -- First-lien
-    AND occupancy_type = 1 -- Owner-occupied
-    AND lien_status = 1 -- Conventional loans
-    AND total_units IN ('1', '2', '3', '4') -- 1-4 family properties
-    AND loan_purpose = 1 -- Home purchase
-    AND action_taken IN ('1', '2', '3')
-    AND reverse_mortgage = 2 -- Exclude reverse mortgages
-    AND open_end_line_of_credit = 2 -- Exclude open end line of credit
-    and construction_method = 1 -- Exclude manufactured home loans
-    and business_or_commercial_purpose  = 2 -- Exclude business/commercial loans
-) TO 'hmda_filtered_2022_2024_filtered.parquet' (FORMAT PARQUET);
-""")
+
+    # Drop columns with >80% null values
+    if exclude_cols:
+        exclude_sql = ", ".join(exclude_cols)
+        print(f"Using EXCLUDE clause with {len(exclude_cols)} columns")
+        sql_query = f"""
+    COPY (
+      SELECT h.* EXCLUDE ({exclude_sql}), 
+             t.low_income_designation
+      FROM read_csv_auto([{files_sql}], delim='|', header=true, union_by_name=true, files_to_sniff=-1) h
+      INNER JOIN target_lei t
+        ON h.{lei_col} = t.lei
+    ) TO 'hmda_filtered_2022_2024.parquet' (FORMAT PARQUET);
+    """
+    else:
+        print("No columns to exclude")
+        sql_query = f"""
+    COPY (
+      SELECT h.*, 
+             t.low_income_designation
+      FROM read_csv_auto([{files_sql}], delim='|', header=true, union_by_name=true, files_to_sniff=-1) h
+      INNER JOIN target_lei t
+        ON h.{lei_col} = t.lei
+    ) TO 'hmda_filtered_2022_2024.parquet' (FORMAT PARQUET);
+    """
+        
+    con.execute(sql_query)
+
+    # Print summary of what was processed
+    total_records = con.execute("SELECT COUNT(*) FROM 'hmda_filtered_2022_2024.parquet'").fetchone()[0]
+    columns_after = con.execute("DESCRIBE SELECT * FROM 'hmda_filtered_2022_2024.parquet' LIMIT 0").fetchall()
+    print(f"Total records: {total_records:,}")
+    print(f"Final columns: {len(columns_after)}")
+    print(f"Columns excluded: {len(exclude_cols)}")
+
+
+    ### Filter the data
+    # conventional, owner-occupied, first-lien loans for 1-4 family properties for home purchases, action taken 1 loan originated, 2 approved not accepted, 3 denied, excludes reverse mortgage, not an open end line of credit, and not a manufactured home loan
+
+    con.execute("""
+    COPY (
+      SELECT *
+      FROM 'hmda_filtered_2022_2024.parquet'
+      WHERE loan_type = 1 -- First-lien
+        AND occupancy_type = 1 -- Owner-occupied
+        AND lien_status = 1 -- Conventional loans
+        AND total_units IN ('1', '2', '3', '4') -- 1-4 family properties
+        AND loan_purpose = 1 -- Home purchase
+        AND action_taken IN ('1', '2', '3')
+        AND reverse_mortgage = 2 -- Exclude reverse mortgages
+        AND open_end_line_of_credit = 2 -- Exclude open end line of credit
+        and construction_method = 1 -- Exclude manufactured home loans
+        and business_or_commercial_purpose  = 2 -- Exclude business/commercial loans
+    ) TO 'hmda_filtered_2022_2024_filtered.parquet' (FORMAT PARQUET);
+    """)
+
+    con.close()
+
 
 
 ```
@@ -282,11 +288,11 @@ summary_df['CU_Type'] = summary_df['low_income_designation'].map({
     '1': 'Low Income Designated'
 })
 
-# Set up the comprehensive dashboard with 3x2 layout
+# Set up the comprehensive dashboard with 2x3 layout  
 plt.style.use('default')
-fig, axes = plt.subplots(3, 2, figsize=(16, 18))
+fig, axes = plt.subplots(2, 3, figsize=(20, 12))
 fig.suptitle('Credit Union Key Metrics by Type and Year\n', 
-             fontsize=18, fontweight='bold', y=0.98)
+             fontsize=18, fontweight='bold', y=0.95)
 
 # Color palette
 colors = ['#001581', '#adadad'] 
@@ -375,7 +381,7 @@ for container in ax5.containers:
     ax5.bar_label(container, fmt='%.2f%%', fontsize=9)
 
 # ax6 = Average Rate Spread by Year
-ax6 = axes[2, 0]
+ax6 = axes[1, 2]
 spread_pivot = summary_df.pivot(index='activity_year', columns='CU_Type', values='avg_rate_spread')
 spread_pivot.plot(kind='bar', ax=ax6, color=colors, alpha=0.8, width=0.7)
 ax6.set_title('Average Rate Spread by Year\n(APR - APOR)', fontsize=14, fontweight='bold', pad=15)
@@ -389,29 +395,15 @@ ax6.tick_params(axis='x', rotation=0)
 for container in ax6.containers:
     ax6.bar_label(container, fmt='%.3f%%', fontsize=9)
 
-# ax7 = Median Rate Spread by Year
-ax7 = axes[2, 1]
-median_spread_pivot = summary_df.pivot(index='activity_year', columns='CU_Type', values='median_rate_spread')
-median_spread_pivot.plot(kind='bar', ax=ax7, color=colors, alpha=0.8, width=0.7)
-ax7.set_title('Median Rate Spread by Year\n(APR - APOR)', fontsize=14, fontweight='bold', pad=15)
-ax7.set_xlabel('Year', fontsize=12)
-ax7.set_ylabel('Median Rate Spread (%)', fontsize=12)
-ax7.legend(title='Credit Union Type', fontsize=10, title_fontsize=11)
-ax7.grid(True, alpha=0.3, axis='y')
-ax7.tick_params(axis='x', rotation=0)
-
-# Add value labels on bars  
-for container in ax7.containers:
-    ax7.bar_label(container, fmt='%.3f%%', fontsize=9)
-
 plt.tight_layout()
-plt.subplots_adjust(top=0.95, hspace=0.4, wspace=0.3)
+plt.subplots_adjust(top=0.92, hspace=0.3, wspace=0.25)
 plt.show()
 
 
 ```
 
 ### Interest Rate Spread Distributions by Low Income Designation and Year
+
 ```{python}
 #| echo: false
 #| message: false
@@ -614,38 +606,34 @@ plt.show()
 
 Key Observations
 
-- Rate spread dropped from 2022 to 2024 across both CU types (positive spread in 2022 to negative in 2024) indicating that CU unions went from pricing above to prime to at or below prime by 2024
-- Low income designated CUs had higher average and median rate spreads than non-low income designated CUs in 2022 and 2023, but the gap narrowed  by 2024
+-   Rate spread dropped from 2022 to 2024 across both CU types (positive spread in 2022 to negative in 2024) indicating that CU unions went from pricing above to prime to at or below prime by 2024
 
-- Low income designated CUs has much higher variability (std deviation) in rate spreads than non-low income designated CUs, especially in 2022 and 2023, indicating more pricing dispersion within that group (standard underwriting)
+-   Low income designated CUs had higher average and median rate spreads than non-low income designated CUs in 2022 and 2023, but the gap narrowed by 2024
 
-- Box plot & violin plot show non-low income CUs have tighter distribution & lower variance thus predicatble pricing while low income CUs have wider distribution, heavy tails in 2024, extremes on both ends (+ and -) thus more unpredictable pricing (higher risk borrowers and more manual underwriting)
- 
- - Mean and median show a classic right skew tail risk pattern with mean above median, especially for low income CUs, indicating a subset of loans with much higher rate spreads (higher risk borrowers) that are pulling the average up while most loans are clustered around lower spreads (prime or near prime pricing)
+-   Low income designated CUs has much higher variability (std deviation) in rate spreads than non-low income designated CUs, especially in 2022 and 2023, indicating more pricing dispersion within that group (standard underwriting)
 
- - Density plot shows non-low income CUs have a more normal distribution centered around 0% spread (prime pricing) while low income CUs have a more skewed distribution with a longer right tail in 2022 and 2023 indicating more loans with higher spreads (higher risk borrowers) but by 2024 both groups show a shift towards negative spreads (below prime pricing) likely due to competitive pressures and economic conditions [need to confirm with macro data]
+-   Box plot & violin plot show non-low income CUs have tighter distribution & lower variance thus predicatble pricing while low income CUs have wider distribution, heavy tails in 2024, extremes on both ends (+ and -) thus more unpredictable pricing (higher risk borrowers and more manual underwriting)
 
- -- Mean & median divergence could mean hidden bias risk (median borrowers get good rate, but a subset of higher risk borrowers get much higher rates) which could be a concern for fair lending and regulatory scrutiny if not properly justified by risk factors (manual underwriting, credit risk, etc) [need to analyze loan level data to confirm]
+-   Mean and median show a classic right skew tail risk pattern with mean above median, especially for low income CUs, indicating a subset of loans with much higher rate spreads (higher risk borrowers) that are pulling the average up while most loans are clustered around lower spreads (prime or near prime pricing)
 
- -- Variance increases for low income CUs could indicate inconsistent pricing logic [need to analyze loan level data to confirm if this is due to manual underwriting, higher risk borrowers, or other factors
- 
-Questions for further analysis:
-- What borrower and loan characteristics are driving the higher rate spreads and variability for low income designated CUs? (manual underwriting, credit risk, loan amount, etc)
-- How do macroeconomic conditions and competitive pressures correlate with the observed trends in rate spreads over time?
-- Is there evidence of potential bias in pricing for low income designated CUs that could raise fair lending concerns, especially for the subset of loans with much higher rate spreads?
+-   Density plot shows non-low income CUs have a more normal distribution centered around 0% spread (prime pricing) while low income CUs have a more skewed distribution with a longer right tail in 2022 and 2023 indicating more loans with higher spreads (higher risk borrowers) but by 2024 both groups show a shift towards negative spreads (below prime pricing) likely due to competitive pressures and economic conditions \[need to confirm with macro data\]
 
-- For tail loans with very high rate spreads, what are the common characteristics (loan amount, credit score, DTI, etc) and how do they differ from the majority of loans with lower spreads? Are these justified by risk factors or could they indicate potential outliers or pricing inconsistencies?
+-- Mean & median divergence could mean hidden bias risk (median borrowers get good rate, but a subset of higher risk borrowers get much higher rates) which could be a concern for fair lending and regulatory scrutiny if not properly justified by risk factors (manual underwriting, credit risk, etc) \[need to analyze loan level data to confirm\]
 
+-- Variance increases for low income CUs could indicate inconsistent pricing logic \[need to analyze loan level data to confirm if this is due to manual underwriting, higher risk borrowers, or other factors
+
+Questions for further analysis: - What borrower and loan characteristics are driving the higher rate spreads and variability for low income designated CUs? (manual underwriting, credit risk, loan amount, etc) - How do macroeconomic conditions and competitive pressures correlate with the observed trends in rate spreads over time? - Is there evidence of potential bias in pricing for low income designated CUs that could raise fair lending concerns, especially for the subset of loans with much higher rate spreads?
+
+-   For tail loans with very high rate spreads, what are the common characteristics (loan amount, credit score, DTI, etc) and how do they differ from the majority of loans with lower spreads? Are these justified by risk factors or could they indicate potential outliers or pricing inconsistencies?
 
 # Modeling
 
-
 # Linear Regression: Explain Rate Spread
 
-Objective is to explain why rates spreads vary across loans and understand factors that drive pricing differences
-Y=Rate Spread (APR - Prime)
+Objective is to explain why rates spreads vary across loans and understand factors that drive pricing differences Y=Rate Spread (APR - Prime)
 
 ## Linear Regression Modeling
+
 ```{python}
 #| echo: false
 #| message: false
@@ -734,8 +722,8 @@ regression_df['year_2024'] = (regression_df['activity_year'] == 2024).astype(int
 
 
 # check if log transformations are needed
-fig, axes = plt.subplots(2, 3, figsize=(12,10))
-fig.suptitle('Distribution Analysis: Original vs Log Transformed Variables', fontsize=16, fontweight='bold')
+fig, axes = plt.subplots(2, 3, figsize=(8,10))
+fig.suptitle('Distribution Analysis: Original vs Log Transformed Variables', fontsize=12, fontweight='bold')
 
 # Define variables to check
 variables_to_check = [
@@ -787,17 +775,6 @@ for i, (var, title) in enumerate(variables_to_check):
                        bbox=dict(boxstyle='round', facecolor='white', alpha=0.8), verticalalignment='top')
             ax_log.legend(fontsize=8)
             
-            # Print summary statistics
-            print(f"\n{title}:")
-            print(f"  Original - Mean: {mean_val:,.0f}, Median: {median_val:,.0f}, Skewness: {skew_val:.3f}")
-            print(f"  Log Transform - Skewness: {log_skew:.3f}")
-            print(f"  Transformation {'RECOMMENDED' if abs(skew_val) > 1 and abs(log_skew) < abs(skew_val) else 'NOT NEEDED'}")
-        else:
-            # Hide subplot if not enough data
-            axes[0, i].set_visible(False)
-            axes[1, i].set_visible(False)
-            print(f"\n{title}: Insufficient data ({len(data)} observations)")
-
 plt.tight_layout()
 plt.show()
 
@@ -872,7 +849,6 @@ print(f"Demographic model dataset: {len(regression_demo):,} loans")
 print(f"Full model dataset: {len(regression_full):,} loans")
 
 # Correlation MATRIX VISUALIZATION
-print("CORRELATION ANALYSIS OF KEY VARIABLES")
 
 # Select key continuous variables for correlation analysis
 corr_vars = ['rate_spread_value', 'cu_type_numeric', 'log_loan_amount', 'log_income', 
@@ -883,7 +859,7 @@ corr_data = regression_df[corr_vars]
 correlation_matrix = corr_data.corr()
 
 # Create correlogram visualization
-plt.figure(figsize=(8, 8))
+plt.figure(figsize=(6,6))
 mask = np.triu(np.ones_like(correlation_matrix, dtype=bool))
 
 # Create heatmap
@@ -907,19 +883,12 @@ plt.tight_layout()
 plt.show()
 
 
-# DIAGNOSE MISSING DATA PATTERNS
-print("\n" + "="*80)
-print("MISSING DATA ANALYSIS - DIAGNOSING SAMPLE SIZE REDUCTION")
-print("="*80)
-
 # Check data availability for each variable set
 all_vars = ['rate_spread_value', 'cu_type_numeric', 'year_2023', 'year_2024', 
            'log_loan_amount', 'log_income', 'dti_ratio', 'ltv_ratio', 'loan_term', 'log_property_value',
            'applicant_age', 'race_encoded', 'ethnicity_encoded', 'sex_encoded', 
            'age_above_62_encoded', 'credit_model_encoded', 'state_encoded']
 
-print(f"{'Variable':<30} {'Available':<12} {'Missing':<12} {'Missing %':<12} {'Data Type':<15}")
-print("-" * 90)
 
 total_rows = len(regression_df)
 for var in all_vars:
@@ -932,14 +901,9 @@ for var in all_vars:
     else:
         print(f"{var:<30} {'NOT FOUND':<12} {'-':<12} {'-':<11} {'-':<15}")
 
-# Progressive data loss analysis
-print(f"\n" + "="*60)
-print("PROGRESSIVE DATA LOSS ANALYSIS")
-print("="*60)
 
-# Start with full dataset and add variables progressively
+# add variables progressively
 current_data = regression_df[['rate_spread_value']]
-print(f"Starting with rate_spread_value: {len(current_data):,} loans")
 
 var_groups = [
     (['cu_type_numeric', 'year_2023', 'year_2024'], 'Core variables'),
@@ -952,36 +916,16 @@ var_groups = [
     (['state_encoded'], 'Geographic controls')
 ]
 
-cumulative_vars = ['rate_spread_value']
-for vars_to_add, group_name in var_groups:
-    # Add variables that exist
-    existing_vars = [v for v in vars_to_add if v in regression_df.columns]
-    if existing_vars:
-        cumulative_vars.extend(existing_vars)
-        current_data = regression_df[cumulative_vars]
-        print(f"After adding {group_name}: {len(current_data):,} loans ({len(current_data)/len(regression_df)*100:.1f}%)")
-        
-        # Show which specific variables caused the biggest drop
-        if len(existing_vars) > 1:
-            for var in existing_vars:
-                test_vars = cumulative_vars[:-len(existing_vars)] + [var]
-                test_data = regression_df[test_vars]
-                print(f"  - Only {var}: {len(test_data):,} loans")
-    else:
-        print(f"After adding {group_name}: Variables not found in dataset")
-
 # Model 1: Baseline model (CU type + year effects + low income designation)
 
-print("MODEL 1: BASELINE MODEL (CU TYPE, LOW INCOME DESIGNATION + YEAR EFFECTS)")
+print("MODEL 1: BASELINE MODEL (CU TYPE, LOW INCOME DESIGNATION + YEAR EFFECTS)\n")
 
 model1_formula = "rate_spread_value ~ cu_type_numeric + year_2023 + year_2024"
 model1 = smf.ols(model1_formula, data=regression_baseline).fit()
 print(model1.summary())
 
 # Model 2: Loan characteristics model  
-print("\n" + "="*80)
 print("MODEL 2: LOAN CHARACTERISTICS MODEL")
-print("="*80)
 
 model2_formula = """rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 + 
                     log_loan_amount + log_income + dti_ratio + ltv_ratio + 
@@ -990,9 +934,7 @@ model2 = smf.ols(model2_formula, data=regression_loan_chars).fit()
 print(model2.summary())
 
 # Model 3: Demographic model (adds borrower characteristics)
-print("\n" + "="*80)
-print("MODEL 3: DEMOGRAPHIC MODEL")
-print("="*80)
+print("MODEL 3: DEMOGRAPHIC MODEL\n \n \n")
 
 model3_formula = """rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 + 
                     log_loan_amount + log_income + dti_ratio + ltv_ratio + 
@@ -1001,10 +943,30 @@ model3_formula = """rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 
 model3 = smf.ols(model3_formula, data=regression_demo).fit()
 print(model3.summary())
 
+# Model 3A extended with DTI and LTV 
+extended_vars = core_vars + ['log_loan_amount', 'log_income', 'interest_rate', 'dti_ratio', 'ltv_ratio']
+regression_extended = regression_df[extended_vars]
+
+print("MODEL 3: EXTENDED MODEL (DTI + LTV)")
+
+model3a_formula = "rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 + log_loan_amount + log_income + interest_rate + dti_ratio + ltv_ratio"
+model3a = smf.ols(model3a_formula, data=regression_extended).fit()
+print(model3a.summary())
+print(f"Extended model dataset: {len(regression_extended):,} loans")
+
+
+# Model 3B: Extended Model WITHOUT DTI (for comparison)
+extended_no_dti_vars = core_vars + ['log_loan_amount', 'log_income', 'ltv_ratio']
+regression_no_dti = regression_df[extended_no_dti_vars]
+
+print("MODEL 3B: EXTENDED MODEL WITHOUT DTI (LTV ONLY)")
+model3b_formula = "rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 + log_loan_amount + log_income + ltv_ratio"
+model3b = smf.ols(model3b_formula, data=regression_no_dti).fit()
+print(model3b.summary())
+
+
 # Model 4: Full model (adds geographic controls)
-print("\n" + "="*80)  
-print("MODEL 4: FULL MODEL (WITH GEOGRAPHIC CONTROLS)")
-print("="*80)
+print("MODEL 4: FULL MODEL (WITH GEOGRAPHIC)\n\n\n")
 
 model4_formula = """rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 + 
                     log_loan_amount + log_income + dti_ratio + ltv_ratio + loan_term + 
@@ -1012,59 +974,24 @@ model4_formula = """rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 
                     sex_encoded + age_above_62_encoded + credit_model_encoded + state_encoded"""
 model4 = smf.ols(model4_formula, data=regression_full).fit()
 print(model4.summary())
-extended_vars = core_vars + ['log_loan_amount', 'log_income', 'interest_rate', 'dti_ratio', 'ltv_ratio']
-regression_extended = regression_df[extended_vars]
 
-if len(regression_extended) > 1000:  # Only run if we have sufficient data
-    print("\n" + "="*80)
-    print("MODEL 3: EXTENDED MODEL (DTI + LTV)")
-    print("="*80)
-    
-    model3_formula = "rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 + log_loan_amount + log_income + interest_rate + dti_ratio + ltv_ratio"
-    model3 = smf.ols(model3_formula, data=regression_extended).fit()
-    print(model3.summary())
-    print(f"Extended model dataset: {len(regression_extended):,} loans")
-else:
-    print(f"Insufficient data for extended model - only {len(regression_extended):,} complete observations")
 
-# Model 3B: Extended Model WITHOUT DTI (for comparison)
-extended_no_dti_vars = core_vars + ['log_loan_amount', 'log_income', 'ltv_ratio']
-regression_no_dti = regression_df[extended_no_dti_vars]
-
-if len(regression_no_dti) > 1000:  # Only run if we have sufficient data
-    print("\n" + "="*80)
-    print("MODEL 3B: EXTENDED MODEL WITHOUT DTI (LTV ONLY)")
-    print("="*80)
-    
-    model3b_formula = "rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 + log_loan_amount + log_income + ltv_ratio"
-    model3b = smf.ols(model3b_formula, data=regression_no_dti).fit()
-    print(model3b.summary())
-    print(f"No-DTI model dataset: {len(regression_no_dti):,} loans")
-    print(f"Sample size improvement by removing DTI: +{len(regression_no_dti) - len(regression_extended):,} loans")
-else:
-    print(f"Insufficient data for no-DTI model - only {len(regression_no_dti):,} complete observations")
-
-# Model 4: Add demographic variables
+# Model 5: Add demographic variables
 demo_vars = core_vars + ['log_loan_amount', 'log_income', 'interest_rate', 'race_encoded', 'ethnicity_encoded', 'sex_encoded']
-regression_demo = regression_df[demo_vars]
+regression_demo_5 = regression_df[demo_vars]
 
-if len(regression_demo) > 1000:
-    print("\n" + "="*80)
-    print("MODEL 4: DEMOGRAPHIC MODEL")
-    print("="*80)
-    
-    model4_formula = "rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 + log_loan_amount + log_income + interest_rate + race_encoded + ethnicity_encoded + sex_encoded"
-    model4 = smf.ols(model4_formula, data=regression_demo).fit()
-    print(model4.summary())
-    print(f"Demographic model dataset: {len(regression_demo):,} loans")
+print("MODEL 5: DEMOGRAPHIC MODEL")
+
+model5_formula = "rate_spread_value ~ cu_type_numeric + year_2023 + year_2024 + log_loan_amount + log_income + interest_rate + race_encoded + ethnicity_encoded + sex_encoded"
+model5 = smf.ols(model5_formula, data=regression_demo_5).fit()
+print(model5.summary())
+print(f"Demographic model dataset: {len(regression_demo_5):,} loans")
 
 # Model Comparison and Visualization
-print("\n" + "="*80)
 print("MODEL COMPARISON")
-print("="*80)
 
-models = [model1, model2]
-model_names = ['Baseline', 'Loan Characteristics']
+models = [model1, model2, model3, model3a, model3b, model4, model5]
+model_names = ['Model 1: Baseline', 'Model 2: Loan Characteristics', 'Model 3: Demographic', 'Model 3A: Extended (DTI + LTV)', 'Model 3B: Extended (LTV Only)', 'Model 4: Full (Geographic Controls)', 'Model 5: Demographic']
 r2_values = [m.rsquared for m in models]
 adj_r2_values = [m.rsquared_adj for m in models]
 aic_values = [m.aic for m in models]
@@ -1080,7 +1007,7 @@ comparison_df = pd.DataFrame({
 print(comparison_df.to_string(index=False))
 
 # Residual Analysis
-fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+fig, axes = plt.subplots(2, 2, figsize=(7,5))
 fig.suptitle('Model 2 Residual Analysis\n(Loan Characteristics Model)', fontsize=16, fontweight='bold')
 
 # Fitted vs Residuals
@@ -1130,9 +1057,7 @@ plt.tight_layout()
 plt.show()
 
 # Feature Importance Analysis
-print("\n" + "="*80)
 print("COEFFICIENT ANALYSIS - MODEL 2")
-print("="*80)
 
 coef_df = pd.DataFrame({
     'Variable': model2.params.index,
@@ -1150,10 +1075,20 @@ print(coef_df.to_string(index=False, float_format='%.6f'))
 
 ```
 
+# Logistic Regression
 
+Objective is to model high spread loans as a binary classification problem to identify key risk factors and potential bias in pricing for higher risk borrowers 
 
-#  Logistic Regression 
-Objective is to model high spread loans (e.g. > 1% spread) as a binary classification problem to identify key risk factors and potential bias in pricing for higher risk borrowers
+Define tail risk as loans with rate spreads above the 90th percentile (top 10% of spreads) Analyze characteristics of these high spread loans compared to the majority of loans with lower spreads (below 90th percentile)
+
+Observations: 
+- Results: high spread threshold \~0.855% and high spread loans \~10% as expected 
+- By CU type: non LI had 9.47% high spread while LI had 10.38% high spread,indicating low income has more high spread loans. 
+- Odds ratio was 0.874 which shows low income CUs have 12.6% lower odds of high spread loans. 
+- Logistic model shows LI Cu better (lower odds) but raw rates show LI worse (more high spreads). 
+- Low income credit unions serve riskier borrowwers but price more favorable than expected. 
+- Model accuracy is high (89%) but only \~11% are high spread loans thus predicting "not high spread" can inflate accuracy. 
+- AUC of 0.58 indicates weak predictive power (barely better than random)
 
 ```{python}
 #| echo: false
@@ -1166,14 +1101,13 @@ from sklearn.model_selection import train_test_split
 import pandas as pd
 import numpy as np
 
-# Create binary target variable for high spread loans using top 10% threshold
+#  binary target variable for high spread loans using top 10% threshold
 threshold_percentile = 90
 threshold = np.percentile(regression_df['rate_spread_value'].dropna(), threshold_percentile)
 regression_df['high_spread'] = (regression_df['rate_spread_value'] > threshold).astype(int)
 
 # Analyze distribution of high spread loans
 print("TAIL RISK ANALYSIS - TOP 10% SPREAD LOANS")
-print("="*60)
 print(f"90th percentile threshold: {threshold:.3f}%")
 print(f"Total loans: {len(regression_df):,}")
 print(f"High spread loans (top 10%): {regression_df['high_spread'].sum():,} ({regression_df['high_spread'].mean()*100:.2f}%)")
@@ -1432,23 +1366,646 @@ for cu_type in [0, 1]:
 
 ```
 
+# Random Forest Models
+
+Objective: Due to non linear relationship and complexity, random forest models can capture interactions and non linearities better than logistic regression. 
+- Train random forest classifiers to predict high spread loans (top 10%) using same features as logistic regression 
+- Analyze feature importance to identify key drivers of high spread loans and potential bias in pricing
+
+```{python}
+#| echo: false
+#| message: false
+#| warning: false
+
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import cross_val_score, GridSearchCV
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score, roc_curve
+from sklearn.preprocessing import StandardScaler
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+print("RANDOM FOREST ANALYSIS FOR HIGH SPREAD LOAN PREDICTION")
+
+# same dataset as logistic regression
+
+# Prepare features and target (same as logistic regression)
+X = logistic_data[log_vars].copy()  # ['cu_type_numeric', 'year_2023', 'year_2024', 'log_loan_amount', 'log_income', 'dti_ratio', 'ltv_ratio']
+y = logistic_data['high_spread'].copy()
+
+print(f"Using logistic regression dataset: {len(logistic_data):,} loans")
+print(f"High spread rate: {logistic_data['high_spread'].mean()*100:.2f}%")
+
+# Check for any remaining missing values and handle them
+print(f"\nMissing values by feature:")
+missing_info = X.isnull().sum()
+total_missing = missing_info.sum()
+
+for feature, missing_count in missing_info.items():
+    if missing_count > 0:
+        print(f"  {feature}: {missing_count:,} ({missing_count/len(X)*100:.1f}%)")
+
+if total_missing > 0:
+    print(f"\nTotal missing values: {total_missing:,}")
+    print("Dropping rows with missing values...")
+    # Drop rows with any missing values
+    valid_mask = X.notnull().all(axis=1)
+    X_filled = X[valid_mask].copy()
+    y_filtered = y[valid_mask].copy()
+    print(f"Rows dropped: {len(X) - len(X_filled):,}")
+    print(f"Final dataset: {len(X_filled):,} loans")
+else:
+    print("No missing values found.")
+    X_filled = X.copy()
+    y_filtered = y.copy()
+    print(f"Final dataset: {len(X_filled):,} loans")
+
+# Train-test split (same split as logistic regression for fair comparison)
+X_train_rf, X_test_rf, y_train_rf, y_test_rf = train_test_split(
+    X_filled, y_filtered, test_size=0.2, random_state=42, stratify=y_filtered
+)
+
+print(f"Training set: {len(X_train_rf):,} loans ({y_train_rf.mean()*100:.2f}% high spread)")
+print(f"Test set: {len(X_test_rf):,} loans ({y_test_rf.mean()*100:.2f}% high spread)")
+
+# Random Forest Model 1: Basic model (same features as logistic basic model)
+basic_features = ['cu_type_numeric', 'year_2023', 'year_2024']
+X_train_rf_basic = X_train_rf[basic_features]
+X_test_rf_basic = X_test_rf[basic_features]
+
+print(f"\nRANDOM FOREST MODEL 1: BASIC (CU TYPE + YEAR)")
+
+
+# Train basic Random Forest
+rf_basic = RandomForestClassifier(
+    n_estimators=100, 
+    random_state=42, 
+    max_depth=10,
+    min_samples_split=5,
+    min_samples_leaf=2,
+    class_weight='balanced',
+    n_jobs=2  # Limit parallel jobs
+)
+rf_basic.fit(X_train_rf_basic, y_train_rf)
+
+# Basic model predictions
+y_train_pred_rf_basic = rf_basic.predict(X_train_rf_basic)
+y_test_pred_rf_basic = rf_basic.predict(X_test_rf_basic)
+y_train_proba_rf_basic = rf_basic.predict_proba(X_train_rf_basic)[:, 1]
+y_test_proba_rf_basic = rf_basic.predict_proba(X_test_rf_basic)[:, 1]
+
+print(f"Training Accuracy: {rf_basic.score(X_train_rf_basic, y_train_rf):.4f}")
+print(f"Test Accuracy: {rf_basic.score(X_test_rf_basic, y_test_rf):.4f}")
+print(f"Training AUC-ROC: {roc_auc_score(y_train_rf, y_train_proba_rf_basic):.4f}")
+print(f"Test AUC-ROC: {roc_auc_score(y_test_rf, y_test_proba_rf_basic):.4f}")
+
+# Feature importance for basic model
+basic_rf_importance = pd.DataFrame({
+    'Feature': basic_features,
+    'Importance': rf_basic.feature_importances_
+}).sort_values('Importance', ascending=False)
+
+print("\nFeature Importance (Basic Model):")
+print(basic_rf_importance.to_string(index=False, float_format='%.4f'))
+
+# Random Forest Model 2: Full model (all features)
+print(f"\nRANDOM FOREST MODEL 2: FULL FEATURE SET")
+
+# Train Random Forest with reasonable defaults to avoid memory issues
+rf_full = RandomForestClassifier(
+    n_estimators=100,
+    max_depth=15,
+    min_samples_split=10,
+    min_samples_leaf=5,
+    random_state=42,
+    class_weight='balanced',
+    n_jobs=2  # Limit parallel jobs to avoid memory issues
+)
+
+rf_full.fit(X_train_rf, y_train_rf)
+
+# Evaluate with cross-validation to estimate generalization performance
+cv_scores = cross_val_score(rf_full, X_train_rf, y_train_rf, cv=3, scoring='roc_auc', n_jobs=1)
+print(f"Cross-validation AUC scores: {cv_scores}")
+print(f"Mean CV AUC: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+
+# Full model predictions
+y_train_pred_rf_full = rf_full.predict(X_train_rf)
+y_test_pred_rf_full = rf_full.predict(X_test_rf)
+y_train_proba_rf_full = rf_full.predict_proba(X_train_rf)[:, 1]
+y_test_proba_rf_full = rf_full.predict_proba(X_test_rf)[:, 1]
+
+print(f"\nFull Model Performance:")
+print(f"Training Accuracy: {rf_full.score(X_train_rf, y_train_rf):.4f}")
+print(f"Test Accuracy: {rf_full.score(X_test_rf, y_test_rf):.4f}")
+print(f"Training AUC-ROC: {roc_auc_score(y_train_rf, y_train_proba_rf_full):.4f}")
+print(f"Test AUC-ROC: {roc_auc_score(y_test_rf, y_test_proba_rf_full):.4f}")
+
+# Feature importance for full model
+full_rf_importance = pd.DataFrame({
+    'Feature': log_vars,
+    'Importance': rf_full.feature_importances_
+}).sort_values('Importance', ascending=False)
+
+print("\nFeature Importance (Full Model):")
+print(full_rf_importance.to_string(index=False, float_format='%.4f'))
+
+# Classification reports
+print(f"\nCLASSIFICATION REPORT - RF BASIC MODEL (TEST SET)")
+print(classification_report(y_test_rf, y_test_pred_rf_basic, target_names=['Normal Spread', 'High Spread']))
+
+print(f"\nCLASSIFICATION REPORT - RF FULL MODEL (TEST SET)")
+print(classification_report(y_test_rf, y_test_pred_rf_full, target_names=['Normal Spread', 'High Spread']))
+
+# Confusion matrices
+print(f"\nCONFUSION MATRICES - RANDOM FOREST")
+print("RF Basic Model (Test Set):")
+print(confusion_matrix(y_test_rf, y_test_pred_rf_basic))
+print("\nRF Full Model (Test Set):")
+print(confusion_matrix(y_test_rf, y_test_pred_rf_full))
+
+# Model comparison: Random Forest vs Logistic Regression
+print(f"\nMODEL COMPARISON: RANDOM FOREST vs LOGISTIC REGRESSION")
+
+comparison_metrics = pd.DataFrame({
+    'Model': [
+        'Logistic - Basic', 'Logistic - Full',
+        'Random Forest - Basic', 'Random Forest - Full'
+    ],
+    'Test_Accuracy': [
+        log_model_basic.score(X_test_basic, y_test),
+        log_model_full.score(X_test, y_test),
+        rf_basic.score(X_test_rf_basic, y_test_rf),
+        rf_full.score(X_test_rf, y_test_rf)
+    ],
+    'Test_AUC': [
+        roc_auc_score(y_test, y_test_proba_basic),
+        roc_auc_score(y_test, y_test_proba_full),
+        roc_auc_score(y_test_rf, y_test_proba_rf_basic),
+        roc_auc_score(y_test_rf, y_test_proba_rf_full)
+    ]
+})
+
+print(comparison_metrics.to_string(index=False, float_format='%.4f'))
+
+# Comprehensive visualization
+fig, axes = plt.subplots(3, 3, figsize=(18, 15))
+fig.suptitle('Random Forest vs Logistic Regression Analysis\nHigh Spread Loan Prediction (Top 10%)', 
+             fontsize=16, fontweight='bold', y=0.95)
+
+# ROC Curves Comparison
+ax1 = axes[0, 0]
+# Logistic regression curves
+fpr_log_basic, tpr_log_basic, _ = roc_curve(y_test, y_test_proba_basic)
+fpr_log_full, tpr_log_full, _ = roc_curve(y_test, y_test_proba_full)
+# Random forest curves
+fpr_rf_basic, tpr_rf_basic, _ = roc_curve(y_test_rf, y_test_proba_rf_basic)
+fpr_rf_full, tpr_rf_full, _ = roc_curve(y_test_rf, y_test_proba_rf_full)
+
+ax1.plot(fpr_log_basic, tpr_log_basic, label=f'Logistic Basic (AUC={roc_auc_score(y_test, y_test_proba_basic):.3f})', 
+         linewidth=2, linestyle='--', color='blue')
+ax1.plot(fpr_log_full, tpr_log_full, label=f'Logistic Full (AUC={roc_auc_score(y_test, y_test_proba_full):.3f})', 
+         linewidth=2, linestyle='--', color='red')
+ax1.plot(fpr_rf_basic, tpr_rf_basic, label=f'RF Basic (AUC={roc_auc_score(y_test_rf, y_test_proba_rf_basic):.3f})', 
+         linewidth=2, color='blue')
+ax1.plot(fpr_rf_full, tpr_rf_full, label=f'RF Full (AUC={roc_auc_score(y_test_rf, y_test_proba_rf_full):.3f})', 
+         linewidth=2, color='red')
+ax1.plot([0, 1], [0, 1], 'k--', alpha=0.6, label='Random')
+ax1.set_xlabel('False Positive Rate')
+ax1.set_ylabel('True Positive Rate')
+ax1.set_title('ROC Curves: RF vs Logistic Regression')
+ax1.legend(fontsize=8)
+ax1.grid(True, alpha=0.3)
+
+# Feature Importance - Random Forest Full Model
+ax2 = axes[0, 1]
+importance_colors = ['darkgreen' if imp > 0.15 else 'green' if imp > 0.1 else 'lightgreen' 
+                    for imp in full_rf_importance['Importance']]
+bars = ax2.barh(range(len(full_rf_importance)), full_rf_importance['Importance'], 
+                color=importance_colors, alpha=0.8)
+ax2.set_yticks(range(len(full_rf_importance)))
+ax2.set_yticklabels(full_rf_importance['Feature'])
+ax2.set_xlabel('Feature Importance')
+ax2.set_title('RF Feature Importance\n(Full Model)')
+ax2.grid(True, alpha=0.3, axis='x')
+
+# Add importance values on bars
+for i, (bar, imp) in enumerate(zip(bars, full_rf_importance['Importance'])):
+    ax2.text(imp + 0.01, bar.get_y() + bar.get_height()/2, 
+             f'{imp:.3f}', va='center', ha='left', fontweight='bold', fontsize=9)
+
+# Model Performance Comparison
+ax3 = axes[0, 2]
+models = ['Log Basic', 'Log Full', 'RF Basic', 'RF Full']
+accuracies = comparison_metrics['Test_Accuracy'].values
+aucs = comparison_metrics['Test_AUC'].values
+
+x = np.arange(len(models))
+width = 0.35
+
+bars1 = ax3.bar(x - width/2, accuracies, width, label='Test Accuracy', alpha=0.8, color='lightblue')
+bars2 = ax3.bar(x + width/2, aucs, width, label='Test AUC', alpha=0.8, color='darkblue')
+
+ax3.set_xlabel('Models')
+ax3.set_ylabel('Performance Score')
+ax3.set_title('Model Performance Comparison')
+ax3.set_xticks(x)
+ax3.set_xticklabels(models, rotation=45)
+ax3.legend()
+ax3.grid(True, alpha=0.3, axis='y')
+ax3.set_ylim(0, 1)
+
+# Add value labels
+for bar, val in zip(bars1, accuracies):
+    ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01, 
+             f'{val:.3f}', ha='center', va='bottom', fontweight='bold', fontsize=8)
+for bar, val in zip(bars2, aucs):
+    ax3.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01, 
+             f'{val:.3f}', ha='center', va='bottom', fontweight='bold', fontsize=8)
+
+# Predicted Probability Distributions - RF Full Model
+ax4 = axes[1, 0]
+ax4.hist(y_test_proba_rf_full[y_test_rf == 0], bins=30, alpha=0.7, 
+         label='Normal Spread', color='blue', density=True)
+ax4.hist(y_test_proba_rf_full[y_test_rf == 1], bins=30, alpha=0.7, 
+         label='Top 10% Spread', color='red', density=True)
+ax4.set_xlabel('Predicted Probability')
+ax4.set_ylabel('Density')
+ax4.set_title('RF Predicted Probability Distribution\n(Full Model)')
+ax4.legend()
+ax4.grid(True, alpha=0.3)
+
+# Feature Importance Comparison: RF vs Logistic Coefficients
+ax5 = axes[1, 1]
+# Get logistic regression coefficients (absolute values for comparison with RF importance)
+log_coefs = pd.DataFrame({
+    'Feature': list(X_train.columns),
+    'Coef_Abs': np.abs(log_model_full.coef_[0])
+})
+
+# Merge RF importance with logistic coefficients
+feature_comparison = full_rf_importance.merge(log_coefs, left_on='Feature', right_on='Feature', how='inner')
+feature_comparison = feature_comparison.sort_values('Importance', ascending=True)
+
+y_pos = np.arange(len(feature_comparison))
+ax5.barh(y_pos - 0.2, feature_comparison['Coef_Abs'], 0.4, 
+         label='Logistic |Coefficient|', alpha=0.7, color='orange')
+ax5.barh(y_pos + 0.2, feature_comparison['Importance'], 0.4, 
+         label='RF Importance', alpha=0.7, color='green')
+
+ax5.set_yticks(y_pos)
+ax5.set_yticklabels(feature_comparison['Feature'])
+ax5.set_xlabel('Normalized Importance/Coefficient')
+ax5.set_title('Feature Importance: RF vs Logistic\n(Normalized Scale)')
+ax5.legend()
+ax5.grid(True, alpha=0.3, axis='x')
+
+# High Spread Prediction by CU Type - RF vs Logistic
+ax6 = axes[1, 2]
+cu_types = ['Non-Low Income', 'Low Income']
+
+# Get predictions for each CU type
+rf_cu_predictions = []
+log_cu_predictions = []
+
+for cu_type_num in [0, 1]:
+    # RF predictions
+    cu_mask_rf = X_test_rf['cu_type_numeric'] == cu_type_num
+    cu_high_spread_actual = y_test_rf[cu_mask_rf].mean() * 100
+    cu_high_spread_pred_rf = y_test_proba_rf_full[cu_mask_rf].mean() * 100
+    rf_cu_predictions.append(cu_high_spread_pred_rf)
+    
+    # Logistic predictions
+    cu_mask_log = X_test['cu_type_numeric'] == cu_type_num
+    cu_high_spread_pred_log = y_test_proba_full[cu_mask_log].mean() * 100
+    log_cu_predictions.append(cu_high_spread_pred_log)
+
+x = np.arange(len(cu_types))
+width = 0.35
+
+ax6.bar(x - width/2, log_cu_predictions, width, label='Logistic Regression', alpha=0.8, color='orange')
+ax6.bar(x + width/2, rf_cu_predictions, width, label='Random Forest', alpha=0.8, color='green')
+
+ax6.set_xlabel('Credit Union Type')
+ax6.set_ylabel('Average Predicted High Spread Probability (%)')
+ax6.set_title('High Spread Predictions by CU Type\n(Model Comparison)')
+ax6.set_xticks(x)
+ax6.set_xticklabels(cu_types)
+ax6.legend()
+ax6.grid(True, alpha=0.3, axis='y')
+
+# Credit Union Type Effect Analysis - RF Model
+ax7 = axes[2, 0]
+cu_effect_analysis = []
+
+for cu_type_num, cu_name in enumerate(['Non-Low Income', 'Low Income']):
+    cu_data = X_test_rf[X_test_rf['cu_type_numeric'] == cu_type_num]
+    cu_target = y_test_rf[X_test_rf['cu_type_numeric'] == cu_type_num]
+    cu_pred_prob = y_test_proba_rf_full[X_test_rf['cu_type_numeric'] == cu_type_num]
+    
+    actual_rate = cu_target.mean() * 100
+    predicted_rate = cu_pred_prob.mean() * 100
+    
+    cu_effect_analysis.append({
+        'CU_Type': cu_name,
+        'Actual_Rate': actual_rate,
+        'Predicted_Rate': predicted_rate,
+        'Count': len(cu_data)
+    })
+
+cu_effect_df = pd.DataFrame(cu_effect_analysis)
+
+x = np.arange(len(cu_effect_df))
+width = 0.35
+
+bars1 = ax7.bar(x - width/2, cu_effect_df['Actual_Rate'], width, 
+                label='Actual High Spread %', alpha=0.8, color='blue')
+bars2 = ax7.bar(x + width/2, cu_effect_df['Predicted_Rate'], width, 
+                label='RF Predicted %', alpha=0.8, color='red')
+
+ax7.set_xlabel('Credit Union Type')
+ax7.set_ylabel('High Spread Rate (%)')
+ax7.set_title('Credit Union Type Effect\n(Actual vs RF Predicted)')
+ax7.set_xticks(x)
+ax7.set_xticklabels(cu_effect_df['CU_Type'])
+ax7.legend()
+ax7.grid(True, alpha=0.3, axis='y')
+
+# Add value labels and sample sizes
+for i, (bar1, bar2) in enumerate(zip(bars1, bars2)):
+    ax7.text(bar1.get_x() + bar1.get_width()/2, bar1.get_height() + 0.1, 
+             f'{cu_effect_df.iloc[i]["Actual_Rate"]:.1f}%', 
+             ha='center', va='bottom', fontweight='bold', fontsize=8)
+    ax7.text(bar2.get_x() + bar2.get_width()/2, bar2.get_height() + 0.1, 
+             f'{cu_effect_df.iloc[i]["Predicted_Rate"]:.1f}%', 
+             ha='center', va='bottom', fontweight='bold', fontsize=8)
+    ax7.text(i, max(cu_effect_df.iloc[i]["Actual_Rate"], cu_effect_df.iloc[i]["Predicted_Rate"]) + 0.5, 
+             f'n={cu_effect_df.iloc[i]["Count"]:,}', 
+             ha='center', va='bottom', fontsize=8)
+
+# Partial Dependence Analysis for Key Features
+ax8 = axes[2, 1]
+
+# Analyze how key continuous features relate to high spread probability
+key_features = ['log_loan_amount', 'log_income', 'dti_ratio', 'ltv_ratio']
+
+for feature in key_features:
+    if feature in X_test_rf.columns and len(X_test_rf) > 0:
+        try:
+            # Sort by feature value and calculate mean predicted probability
+            sorted_idx = X_test_rf[feature].argsort()
+            sorted_probs = y_test_proba_rf_full[sorted_idx]
+            
+            # Take rolling mean to smooth the curve (smaller window to reduce memory)
+            window_size = min(50, max(10, len(sorted_probs) // 50))
+            smooth_probs = pd.Series(sorted_probs).rolling(window=window_size, center=True).mean()
+            
+            # Sample fewer points for visualization to reduce memory usage
+            n_points = min(50, len(smooth_probs))
+            if n_points > 0:
+                step = max(1, len(smooth_probs) // n_points)
+                sample_idx = range(0, len(smooth_probs), step)
+                
+                x_vals = X_test_rf[feature].iloc[sorted_idx].iloc[sample_idx]
+                y_vals = smooth_probs.iloc[sample_idx].dropna()
+                
+                if len(y_vals) > 0:
+                    ax8.plot(x_vals[:len(y_vals)], y_vals * 100, label=feature, linewidth=2, alpha=0.8)
+        except Exception as e:
+            print(f"Warning: Could not create partial dependence plot for {feature}: {e}")
+            continue
+
+ax8.set_xlabel('Feature Value (Log/Ratio Scale)')
+ax8.set_ylabel('Predicted High Spread Probability (%)')
+ax8.set_title('Feature Effects on High Spread Probability\n(Random Forest)')
+ax8.legend()
+ax8.grid(True, alpha=0.3)
+
+# Summary Statistics Table
+ax9 = axes[2, 2]
+ax9.axis('off')
+
+summary_stats = [
+    ['Metric', 'Logistic Basic', 'Logistic Full', 'RF Basic', 'RF Full'],
+    ['Test Accuracy', f'{comparison_metrics.iloc[0]["Test_Accuracy"]:.4f}', 
+     f'{comparison_metrics.iloc[1]["Test_Accuracy"]:.4f}',
+     f'{comparison_metrics.iloc[2]["Test_Accuracy"]:.4f}', 
+     f'{comparison_metrics.iloc[3]["Test_Accuracy"]:.4f}'],
+    ['Test AUC', f'{comparison_metrics.iloc[0]["Test_AUC"]:.4f}', 
+     f'{comparison_metrics.iloc[1]["Test_AUC"]:.4f}',
+     f'{comparison_metrics.iloc[2]["Test_AUC"]:.4f}', 
+     f'{comparison_metrics.iloc[3]["Test_AUC"]:.4f}'],
+    ['Top Feature', 'cu_type_numeric', list(log_vars)[np.argmax(np.abs(log_model_full.coef_[0]))],
+     full_rf_importance.iloc[0]['Feature'], full_rf_importance.iloc[0]['Feature']],
+    ['CU Type Effect', 'Lower odds for LI', 'Lower odds for LI',
+     f'{"Higher" if rf_cu_predictions[1] > rf_cu_predictions[0] else "Lower"} pred for LI',
+     f'{"Higher" if rf_cu_predictions[1] > rf_cu_predictions[0] else "Lower"} pred for LI']
+]
+
+table = ax9.table(cellText=summary_stats[1:],
+                 colLabels=summary_stats[0],
+                 cellLoc='center',
+                 loc='center',
+                 bbox=[0, 0, 1, 1])
+table.auto_set_font_size(False)
+table.set_fontsize(8)
+table.scale(1, 1.5)
+
+# Style the header row
+for i in range(len(summary_stats[0])):
+    table[(0, i)].set_facecolor('#40466e')
+    table[(0, i)].set_text_props(weight='bold', color='white')
+
+ax9.set_title('Model Summary Comparison', fontsize=12, fontweight='bold', pad=20)
+
+plt.tight_layout()
+plt.subplots_adjust(top=0.92, hspace=0.3, wspace=0.25)
+plt.show()
+
+# Key Findings Summary
+print(f"\nKEY FINDINGS - RANDOM FOREST ANALYSIS")
+print("="*45)
+
+print(f"\n1. MODEL PERFORMANCE:")
+print(f"   - Random Forest Full Model achieves {roc_auc_score(y_test_rf, y_test_proba_rf_full):.3f} AUC vs {roc_auc_score(y_test, y_test_proba_full):.3f} for Logistic Regression")
+print(f"   - RF shows {'better' if roc_auc_score(y_test_rf, y_test_proba_rf_full) > roc_auc_score(y_test, y_test_proba_full) else 'similar'} predictive performance")
+
+print(f"\n2. FEATURE IMPORTANCE:")
+print(f"   - Most important feature: {full_rf_importance.iloc[0]['Feature']} ({full_rf_importance.iloc[0]['Importance']:.3f})")
+print(f"   - Second most important: {full_rf_importance.iloc[1]['Feature']} ({full_rf_importance.iloc[1]['Importance']:.3f})")
+print(f"   - CU type importance: {full_rf_importance[full_rf_importance['Feature'] == 'cu_type_numeric']['Importance'].iloc[0]:.3f}")
+
+print(f"\n3. CREDIT UNION TYPE EFFECT:")
+cu_effect_diff = rf_cu_predictions[1] - rf_cu_predictions[0]
+print(f"   - Low Income CUs: {rf_cu_predictions[1]:.1f}% predicted high spread rate")
+print(f"   - Non-Low Income CUs: {rf_cu_predictions[0]:.1f}% predicted high spread rate")
+print(f"   - Difference: {cu_effect_diff:+.1f} percentage points")
+
+print(f"\n4. MODEL INTERPRETATION:")
+if roc_auc_score(y_test_rf, y_test_proba_rf_full) > roc_auc_score(y_test, y_test_proba_full):
+    print("   - Random Forest captures non-linear relationships better than logistic regression")
+else:
+    print("   - Linear relationships appear sufficient; Random Forest shows similar performance")
+
+print("   - Feature interactions and non-linearities are important for high spread prediction")
+print(f"   - CU type remains important but other factors (loan characteristics) dominate")
+```
+
+
+
+
 # Segment by borrower characteristics
 
-income bands
-loan amount
-tract income
-race/ethnicity
-
+income bands loan amount tract income race/ethnicity
 
 # Compute fairness metrics
-Approval rate differences
-pricing disparities
-Equalized 1. 
 
-# Analyze tail risk 
-Look at top 5% spread and understand the extreme pricing cases
+“Do borrowers served by low-income designated credit unions have a different likelihood of receiving high-cost loans compared to those served by non-low-income credit unions?”
+Output: high spread (top 10%) 
+Groups are low-income vs non-low-income credit unions
+
+```{python}
+#| echo: false
+#| message: false
+#| warning: false
+
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+print("INSTITUTIONAL FAIRNESS ANALYSIS")
+print("="*50)
+print("Research Question: Do borrowers served by low-income designated credit unions")
+print("have a different likelihood of receiving high-cost loans compared to those")
+print("served by non-low-income credit unions?")
+print()
+
+# Define the disparate impact function
+def disparate_impact(y_pred, cu_type):
+    """Calculate Disparate Impact ratio"""
+    p_li = y_pred[cu_type == 1].mean()
+    p_nonli = y_pred[cu_type == 0].mean()
+    return p_li / p_nonli
+
+def fairness_interpretation(di_ratio):
+    """Interpret disparate impact ratio"""
+    if 0.8 <= di_ratio <= 1.25:
+        return "FAIR (no significant disparity)"
+    elif di_ratio > 1.25:
+        return "UNFAIR - LI CUs have HIGHER rates"
+    else:
+        return "REVERSE DISPARITY - LI CUs have LOWER rates"
+
+# LEVEL 1: RAW FAIRNESS
+print("LEVEL 1: RAW/DESCRIPTIVE FAIRNESS")
+print("="*40)
+
+raw_fairness = regression_df.groupby('cu_type_numeric')['high_spread'].agg(['count', 'sum', 'mean']).reset_index()
+raw_fairness['cu_type_name'] = raw_fairness['cu_type_numeric'].map({0: 'Non-Low-Income CU', 1: 'Low-Income CU'})
+raw_fairness['rate_pct'] = raw_fairness['mean'] * 100
+
+print("Raw High-Cost Loan Rates:")
+for _, row in raw_fairness.iterrows():
+    print(f"{row['cu_type_name']:20} {row['rate_pct']:6.2f}% ({int(row['sum']):,}/{int(row['count']):,} loans)")
+
+raw_di = disparate_impact(regression_df['high_spread'], regression_df['cu_type_numeric'])
+print(f"\nRaw Disparate Impact Ratio: {raw_di:.3f}")
+print(f"Assessment: {fairness_interpretation(raw_di)}")
+
+# LEVEL 2: LOGISTIC REGRESSION FAIRNESS
+print(f"\n\nLEVEL 2: MODEL-BASED FAIRNESS (Logistic)")
+print("="*45)
+
+logistic_predictions = y_test_proba_full > 0.5
+logistic_di = disparate_impact(logistic_predictions, X_test['cu_type_numeric'])
+
+print(f"Logistic Disparate Impact Ratio: {logistic_di:.3f}")
+print(f"Assessment: {fairness_interpretation(logistic_di)}")
+
+# LEVEL 3: RANDOM FOREST FAIRNESS  
+print(f"\n\nLEVEL 3: NONLINEAR FAIRNESS (Random Forest)")
+print("="*45)
+
+rf_predictions = y_test_proba_rf_full > 0.5
+rf_di = disparate_impact(rf_predictions, X_test_rf['cu_type_numeric'])
+
+print(f"Random Forest Disparate Impact Ratio: {rf_di:.3f}")
+print(f"Assessment: {fairness_interpretation(rf_di)}")
+
+# SUMMARY COMPARISON
+print(f"\n\nCOMPREHENSIVE FAIRNESS SUMMARY")
+print("="*40)
+
+fairness_comparison = pd.DataFrame({
+    'Level': ['Raw', 'Logistic', 'Random Forest'],
+    'DI_Ratio': [raw_di, logistic_di, rf_di],
+    'Assessment': [fairness_interpretation(di) for di in [raw_di, logistic_di, rf_di]]
+})
+
+print(fairness_comparison.to_string(index=False))
+
+print(f"\n🎯 KEY THESIS INSIGHT:")
+if raw_di > 1 and logistic_di < 1:
+    print("   ✅ SIMPSON'S PARADOX: Raw data shows LI CUs worse, but after risk adjustment they're better!")
+    print("   → LI CUs serve riskier populations but price more favorably than expected")
+elif raw_di > 1 and logistic_di > 1:
+    print("   ⚠️ PERSISTENT DISPARITY: LI CUs consistently show higher rates")
+else:
+    print("   ✅ CONSISTENT PATTERN across all analysis levels")
+
+print(f"\n📊 Model Complexity Impact:")
+print(f"   • Linear vs Raw difference: {abs(logistic_di - raw_di):.3f}")
+print(f"   • Nonlinear vs Linear difference: {abs(rf_di - logistic_di):.3f}")
+
+# Visualization
+fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+fig.suptitle('Institutional Fairness Analysis: Disparate Impact Across Analysis Levels', 
+             fontsize=14, fontweight='bold')
+
+# Plot 1: Disparate Impact Ratios
+ax1 = axes[0]
+levels = ['Raw', 'Logistic', 'RF']
+di_values = [raw_di, logistic_di, rf_di]
+colors = ['red' if di > 1.25 else 'orange' if di > 1 else 'green' if di >= 0.8 else 'red' for di in di_values]
+
+bars = ax1.bar(levels, di_values, color=colors, alpha=0.7)
+ax1.axhline(y=1.0, color='black', linestyle='-', alpha=0.8, label='Perfect Equality')
+ax1.axhline(y=1.25, color='red', linestyle='--', alpha=0.6, label='Unfair Threshold')
+ax1.axhline(y=0.8, color='red', linestyle='--', alpha=0.6)
+
+ax1.set_ylabel('Disparate Impact Ratio')
+ax1.set_title('Disparate Impact Ratios\n(LI CU Rate / Non-LI CU Rate)')
+ax1.legend(fontsize=8)
+ax1.grid(True, alpha=0.3, axis='y')
+
+# Add value labels
+for bar, di in zip(bars, di_values):
+    ax1.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.02,
+             f'{di:.3f}', ha='center', va='bottom', fontweight='bold', fontsize=10)
+
+# Plot 2: Fairness Assessment Summary  
+ax2 = axes[1]
+ax2.axis('off')
+
+summary_data = [[level, f"{di:.3f}", assessment] 
+                for level, di, assessment in zip(levels, di_values, 
+                [fairness_interpretation(di) for di in di_values])]
+
+table = ax2.table(cellText=summary_data,
+                 colLabels=['Level', 'DI Ratio', 'Assessment'],
+                 cellLoc='center', loc='center', bbox=[0, 0.3, 1, 0.6])
+table.auto_set_font_size(False)
+table.set_fontsize(10)
+table.scale(1, 2)
+
+ax2.set_title('Fairness Assessment Summary', fontsize=12, fontweight='bold', pad=20)
+
+plt.tight_layout()
+plt.show()
+```
 
 
 
-2. second
-3. third
+
